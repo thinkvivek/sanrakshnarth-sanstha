@@ -1,3 +1,5 @@
 # sanrakshnarth-sanstha
 
-Website for an NGO in Rajasthan, India
+Website for an NGO in Rajasthan, India.
+
+SanrakshnarthSanstha
