@@ -9,8 +9,8 @@ class Program
     static void Main()
     {
         // Load Excel files into ExcelPackage objects
-        ExcelPackage excelPackage1 = new ExcelPackage(new System.IO.FileInfo("file1.xlsx"));
-        ExcelPackage excelPackage2 = new ExcelPackage(new System.IO.FileInfo("file2.xlsx"));
+        ExcelPackage excelPackage1 = new ExcelPackage(new System.IO.FileInfo("worksheet1.xlsx"));
+        ExcelPackage excelPackage2 = new ExcelPackage(new System.IO.FileInfo("worksheet2.xlsx"));
 
         // Get worksheets from ExcelPackage objects
         ExcelWorksheet worksheet1 = excelPackage1.Workbook.Worksheets[0];
@@ -36,72 +36,94 @@ class Program
         {
             differencesWorksheet.Cells[1, col].Value = worksheet1.Cells[1, col].Value;
         }
-        for (int col = 1; col <= worksheet2.Dimension.End.Column; col++)
-        {
-            differencesWorksheet.Cells[1, worksheet1.Dimension.End.Column + col].Value = worksheet2.Cells[1, col].Value;
-        }
-
-        // Initialize row index for the differences worksheet
-        int differencesRowIndex = 2;
 
         // Compare rows
-        int rowIndex1 = 2;
-        int rowIndex2 = 2;
-        while (true)
+        for (int row1Index = 2; row1Index <= worksheet1.Dimension.End.Row; row1Index++)
         {
-            // Get the rows to compare
-            var row1 = worksheet1.Cells[rowIndex1, 1, rowIndex1, worksheet1.Dimension.End.Column];
-            var row2 = worksheet2.Cells[rowIndex2, 1, rowIndex2, worksheet2.Dimension.End.Column];
+            // Get the current row from worksheet1
+            var row1 = worksheet1.Cells[row1Index, 1, row1Index, worksheet1.Dimension.End.Column];
 
-            // If one of the rows is null, we've reached the end of one of the sheets
-            if (row1.Value == null && row2.Value == null)
-                break;
+            // Find the best match row in worksheet2
+            int bestMatchRowIndex = FindBestMatchRowIndex(row1, worksheet2);
 
-            // Find the number of matching columns
-            int matchingColumns = FindMatchingColumns(row1, row2);
-
-            // Copy rows to differences worksheet
-            if (matchingColumns == worksheet1.Dimension.End.Column) // If all columns match
+            // If a match is found, compare the rows
+            if (bestMatchRowIndex != -1)
             {
-                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex1, 2, differencesRowIndex, matchingColumns, Color.LightGreen);
-                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex2, worksheet1.Dimension.End.Column + 1, differencesRowIndex, matchingColumns, Color.LightGreen);
+                var row2 = worksheet2.Cells[bestMatchRowIndex, 1, bestMatchRowIndex, worksheet2.Dimension.End.Column];
+                CompareAndHighlightRows(row1, row2, differencesWorksheet, row1Index);
             }
-            else // If not all columns match
+            else
             {
-                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex1, 2, differencesRowIndex, worksheet1.Dimension.End.Column, Color.Red);
-                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex2, worksheet1.Dimension.End.Column + 1, differencesRowIndex, worksheet2.Dimension.End.Column, Color.Red);
+                // If no match is found, mark the entire row from worksheet1 as a difference
+                HighlightRow(differencesWorksheet, row1Index, worksheet1.Dimension.End.Column, Color.Red);
             }
+        }
 
-            // Move to the next row index for the differences worksheet
-            differencesRowIndex++;
-
-            // Move to the next row index for each source worksheet
-            if (row1.Value != null)
-                rowIndex1++;
-            if (row2.Value != null)
-                rowIndex2++;
+        // Check for remaining rows in worksheet2 that were not matched
+        for (int row2Index = 2; row2Index <= worksheet2.Dimension.End.Row; row2Index++)
+        {
+            var row2 = worksheet2.Cells[row2Index, 1, row2Index, worksheet2.Dimension.End.Column];
+            HighlightRow(differencesWorksheet, row2Index + worksheet1.Dimension.End.Row, worksheet1.Dimension.End.Column, Color.Red);
         }
     }
 
-    static int FindMatchingColumns(ExcelRange row1, ExcelRange row2)
+    static int FindBestMatchRowIndex(ExcelRangeBase row, ExcelWorksheet worksheet)
+    {
+        int bestMatchRowIndex = -1;
+        int maxMatchingColumns = 0;
+
+        for (int rowIndex = 2; rowIndex <= worksheet.Dimension.End.Row; rowIndex++)
+        {
+            var currentRow = worksheet.Cells[rowIndex, 1, rowIndex, worksheet.Dimension.End.Column];
+            int matchingColumns = CountMatchingColumns(row, currentRow);
+
+            if (matchingColumns > maxMatchingColumns)
+            {
+                maxMatchingColumns = matchingColumns;
+                bestMatchRowIndex = rowIndex;
+            }
+        }
+
+        return bestMatchRowIndex;
+    }
+
+    static int CountMatchingColumns(ExcelRangeBase row1, ExcelRangeBase row2)
     {
         int matchingColumns = 0;
+
         for (int col = 1; col <= row1.End.Column; col++)
         {
-            if (row1.GetValue(1, col).Equals(row2.GetValue(1, col)))
+            if (row1[1, col].Value.Equals(row2[1, col].Value))
+            {
                 matchingColumns++;
+            }
         }
+
         return matchingColumns;
     }
 
-    static void CopyRowToDifferences(ExcelWorksheet sourceWorksheet, ExcelWorksheet differencesWorksheet, int sourceRowIndex, int startColumn, int destRowIndex, int endColumn, Color color)
+    static void CompareAndHighlightRows(ExcelRangeBase row1, ExcelRangeBase row2, ExcelWorksheet differencesWorksheet, int rowIndex)
     {
-        for (int col = 1; col <= endColumn; col++)
+        for (int col = 1; col <= row1.End.Column; col++)
         {
-            var sourceCell = sourceWorksheet.Cells[sourceRowIndex, col];
-            differencesWorksheet.Cells[destRowIndex, startColumn + col - 1].Value = sourceCell.Value;
-            differencesWorksheet.Cells[destRowIndex, startColumn + col - 1].Style.Fill.PatternType = ExcelFillStyle.Solid;
-            differencesWorksheet.Cells[destRowIndex, startColumn + col - 1].Style.Fill.BackgroundColor.SetColor(color);
+            if (!row1[1, col].Value.Equals(row2[1, col].Value))
+            {
+                HighlightCell(differencesWorksheet, rowIndex, col, Color.Red);
+            }
         }
+    }
+
+    static void HighlightRow(ExcelWorksheet worksheet, int rowIndex, int numColumns, Color color)
+    {
+        for (int col = 1; col <= numColumns; col++)
+        {
+            HighlightCell(worksheet, rowIndex, col, color);
+        }
+    }
+
+    static void HighlightCell(ExcelWorksheet worksheet, int rowIndex, int colIndex, Color color)
+    {
+        worksheet.Cells[rowIndex, colIndex].Style.Fill.PatternType = ExcelFillStyle.Solid;
+        worksheet.Cells[rowIndex, colIndex].Style.Fill.BackgroundColor.SetColor(color);
     }
 }
