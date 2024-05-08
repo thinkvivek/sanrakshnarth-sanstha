@@ -41,13 +41,17 @@ class Program
             differencesWorksheet.Cells[1, worksheet1.Dimension.End.Column + col].Value = worksheet2.Cells[1, col].Value;
         }
 
+        // Initialize row index for the differences worksheet
+        int differencesRowIndex = 2;
+
         // Compare rows
-        int rowIndex = 2;
+        int rowIndex1 = 2;
+        int rowIndex2 = 2;
         while (true)
         {
             // Get the rows to compare
-            var row1 = worksheet1.Cells[rowIndex, 1, rowIndex, worksheet1.Dimension.End.Column];
-            var row2 = worksheet2.Cells[rowIndex, 1, rowIndex, worksheet2.Dimension.End.Column];
+            var row1 = worksheet1.Cells[rowIndex1, 1, rowIndex1, worksheet1.Dimension.End.Column];
+            var row2 = worksheet2.Cells[rowIndex2, 1, rowIndex2, worksheet2.Dimension.End.Column];
 
             // If one of the rows is null, we've reached the end of one of the sheets
             if (row1.Value == null && row2.Value == null)
@@ -59,25 +63,32 @@ class Program
             // Copy rows to differences worksheet
             if (matchingColumns == worksheet1.Dimension.End.Column) // If all columns match
             {
-                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex, 2, rowIndex, matchingColumns, Color.LightGreen);
-                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex, worksheet1.Dimension.End.Column + 1, rowIndex, matchingColumns, Color.LightGreen);
+                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex1, 2, differencesRowIndex, matchingColumns, Color.LightGreen);
+                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex2, worksheet1.Dimension.End.Column + 1, differencesRowIndex, matchingColumns, Color.LightGreen);
             }
             else // If not all columns match
             {
-                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex, 2, rowIndex, worksheet1.Dimension.End.Column, Color.Red);
-                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex, worksheet1.Dimension.End.Column + 1, rowIndex, worksheet2.Dimension.End.Column, Color.Red);
+                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex1, 2, differencesRowIndex, worksheet1.Dimension.End.Column, Color.Red);
+                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex2, worksheet1.Dimension.End.Column + 1, differencesRowIndex, worksheet2.Dimension.End.Column, Color.Red);
             }
 
-            rowIndex++;
+            // Move to the next row index for the differences worksheet
+            differencesRowIndex++;
+
+            // Move to the next row index for each source worksheet
+            if (row1.Value != null)
+                rowIndex1++;
+            if (row2.Value != null)
+                rowIndex2++;
         }
     }
 
-    static int FindMatchingColumns(ExcelRangeBase row1, ExcelRangeBase row2)
+    static int FindMatchingColumns(ExcelRange row1, ExcelRange row2)
     {
         int matchingColumns = 0;
         for (int col = 1; col <= row1.End.Column; col++)
         {
-            if (row1[1, col].Value != null && row1[1, col].Value.Equals(row2[1, col].Value))
+            if (row1.GetValue(1, col).Equals(row2.GetValue(1, col)))
                 matchingColumns++;
         }
         return matchingColumns;
