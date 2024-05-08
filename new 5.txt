@@ -1,0 +1,96 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using OfficeOpenXml;
+using OfficeOpenXml.Style;
+
+class Program
+{
+    static void Main()
+    {
+        // Load Excel files into ExcelPackage objects
+        ExcelPackage excelPackage1 = new ExcelPackage(new System.IO.FileInfo("file1.xlsx"));
+        ExcelPackage excelPackage2 = new ExcelPackage(new System.IO.FileInfo("file2.xlsx"));
+
+        // Get worksheets from ExcelPackage objects
+        ExcelWorksheet worksheet1 = excelPackage1.Workbook.Worksheets[0];
+        ExcelWorksheet worksheet2 = excelPackage2.Workbook.Worksheets[0];
+
+        // Create a new ExcelPackage for differences
+        ExcelPackage differencesPackage = new ExcelPackage();
+        ExcelWorksheet differencesWorksheet = differencesPackage.Workbook.Worksheets.Add("Differences");
+
+        // Compare the two Excel sheets
+        CompareExcelSheets(worksheet1, worksheet2, differencesWorksheet);
+
+        // Save the differences Excel sheet
+        differencesPackage.SaveAs(new System.IO.FileInfo("differences.xlsx"));
+
+        Console.WriteLine("Differences saved successfully.");
+    }
+
+    static void CompareExcelSheets(ExcelWorksheet worksheet1, ExcelWorksheet worksheet2, ExcelWorksheet differencesWorksheet)
+    {
+        // Copy headers to differences worksheet
+        for (int col = 1; col <= worksheet1.Dimension.End.Column; col++)
+        {
+            differencesWorksheet.Cells[1, col].Value = worksheet1.Cells[1, col].Value;
+        }
+        for (int col = 1; col <= worksheet2.Dimension.End.Column; col++)
+        {
+            differencesWorksheet.Cells[1, worksheet1.Dimension.End.Column + col].Value = worksheet2.Cells[1, col].Value;
+        }
+
+        // Compare rows
+        int rowIndex = 2;
+        while (true)
+        {
+            // Get the rows to compare
+            var row1 = worksheet1.Cells[rowIndex, 1, rowIndex, worksheet1.Dimension.End.Column];
+            var row2 = worksheet2.Cells[rowIndex, 1, rowIndex, worksheet2.Dimension.End.Column];
+
+            // If one of the rows is null, we've reached the end of one of the sheets
+            if (row1.Value == null && row2.Value == null)
+                break;
+
+            // Find the number of matching columns
+            int matchingColumns = FindMatchingColumns(row1, row2);
+
+            // Copy rows to differences worksheet
+            if (matchingColumns == worksheet1.Dimension.End.Column) // If all columns match
+            {
+                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex, 2, rowIndex, matchingColumns, Color.LightGreen);
+                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex, worksheet1.Dimension.End.Column + 1, rowIndex, matchingColumns, Color.LightGreen);
+            }
+            else // If not all columns match
+            {
+                CopyRowToDifferences(worksheet1, differencesWorksheet, rowIndex, 2, rowIndex, worksheet1.Dimension.End.Column, Color.Red);
+                CopyRowToDifferences(worksheet2, differencesWorksheet, rowIndex, worksheet1.Dimension.End.Column + 1, rowIndex, worksheet2.Dimension.End.Column, Color.Red);
+            }
+
+            rowIndex++;
+        }
+    }
+
+    static int FindMatchingColumns(ExcelRangeBase row1, ExcelRangeBase row2)
+    {
+        int matchingColumns = 0;
+        for (int col = 1; col <= row1.End.Column; col++)
+        {
+            if (row1[1, col].Value != null && row1[1, col].Value.Equals(row2[1, col].Value))
+                matchingColumns++;
+        }
+        return matchingColumns;
+    }
+
+    static void CopyRowToDifferences(ExcelWorksheet sourceWorksheet, ExcelWorksheet differencesWorksheet, int sourceRowIndex, int startColumn, int destRowIndex, int endColumn, Color color)
+    {
+        for (int col = 1; col <= endColumn; col++)
+        {
+            var sourceCell = sourceWorksheet.Cells[sourceRowIndex, col];
+            differencesWorksheet.Cells[destRowIndex, startColumn + col - 1].Value = sourceCell.Value;
+            differencesWorksheet.Cells[destRowIndex, startColumn + col - 1].Style.Fill.PatternType = ExcelFillStyle.Solid;
+            differencesWorksheet.Cells[destRowIndex, startColumn + col - 1].Style.Fill.BackgroundColor.SetColor(color);
+        }
+    }
+}
