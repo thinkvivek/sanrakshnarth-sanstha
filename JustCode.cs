@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
-using System.Linq;
 using ClosedXML.Excel;
 using ExcelDataReader;
 
@@ -12,20 +11,26 @@ class Program
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
-        // Load data from .xls files
-        var worksheet1Data = ReadExcelFile("worksheet1.xls");
-        var worksheet2Data = ReadExcelFile("worksheet2.xls");
+        // Load data from .xls files, excluding the header row
+        var worksheet1Data = ReadExcelFile("worksheet1.xls", out int numColumns, out List<string> headers);
+        var worksheet2Data = ReadExcelFile("worksheet2.xls", out _, out _);
+
+        if (worksheet1Data.Count == 0 || worksheet2Data.Count == 0)
+        {
+            Console.WriteLine("One of the worksheets is empty. Exiting.");
+            return;
+        }
 
         using (var workbook = new XLWorkbook())
         {
             // Create a new worksheet for differences
             var differencesSheet = workbook.Worksheets.Add("differences");
 
-            // Add header with "SheetName" column
+            // Add header with "SheetName" column and the actual headers from worksheet1
             differencesSheet.Cell(1, 1).Value = "SheetName";
-            for (int col = 1; col <= 44; col++)
+            for (int col = 0; col < headers.Count; col++)
             {
-                differencesSheet.Cell(1, col + 1).Value = $"Column{col}";
+                differencesSheet.Cell(1, col + 2).Value = headers[col];
             }
 
             // Match rows and add to differences sheet
@@ -53,14 +58,14 @@ class Program
                 if (bestMatchIndex != -1)
                 {
                     matchedRows2.Add(bestMatchIndex);
-                    AddRow(differencesSheet, currentRow, "worksheet1", worksheet1Data[i], worksheet2Data[bestMatchIndex]);
+                    AddRow(differencesSheet, currentRow, "worksheet1", worksheet1Data[i], worksheet2Data[bestMatchIndex], numColumns);
                     currentRow++;
-                    AddRow(differencesSheet, currentRow, "worksheet2", worksheet2Data[bestMatchIndex], worksheet1Data[i]);
+                    AddRow(differencesSheet, currentRow, "worksheet2", worksheet2Data[bestMatchIndex], worksheet1Data[i], numColumns);
                     currentRow++;
                 }
                 else
                 {
-                    AddRow(differencesSheet, currentRow, "worksheet1", worksheet1Data[i], null);
+                    AddRow(differencesSheet, currentRow, "worksheet1", worksheet1Data[i], null, numColumns);
                     currentRow++;
                 }
             }
@@ -70,7 +75,7 @@ class Program
             {
                 if (!matchedRows2.Contains(j))
                 {
-                    AddRow(differencesSheet, currentRow, "worksheet2", worksheet2Data[j], null);
+                    AddRow(differencesSheet, currentRow, "worksheet2", worksheet2Data[j], null, numColumns);
                     currentRow++;
                 }
             }
@@ -79,19 +84,37 @@ class Program
         }
     }
 
-    static List<List<string>> ReadExcelFile(string filePath)
+    static List<List<string>> ReadExcelFile(string filePath, out int numColumns, out List<string> headers)
     {
         var data = new List<List<string>>();
+        headers = new List<string>();
+        numColumns = 0;
 
         using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read))
         {
             using (var reader = ExcelDataReader.ExcelReaderFactory.CreateReader(stream))
             {
-                var result = reader.AsDataSet();
+                var conf = new ExcelDataSetConfiguration
+                {
+                    ConfigureDataTable = _ => new ExcelDataTableConfiguration
+                    {
+                        UseHeaderRow = true // Use first row as column names
+                    }
+                };
+
+                var result = reader.AsDataSet(conf);
 
                 var table = result.Tables[0]; // Assuming the data is in the first sheet
+                numColumns = table.Columns.Count;
 
-                for (int row = 0; row < table.Rows.Count; row++) // Including the header row for easier mapping
+                // Read headers
+                for (int col = 0; col < table.Columns.Count; col++)
+                {
+                    headers.Add(table.Columns[col].ColumnName);
+                }
+
+                // Read data excluding header row
+                for (int row = 1; row < table.Rows.Count; row++)
                 {
                     var rowData = new List<string>();
                     for (int col = 0; col < table.Columns.Count; col++)
@@ -119,10 +142,10 @@ class Program
         return matches;
     }
 
-    static void AddRow(IXLWorksheet sheet, int row, string sheetName, List<string> rowData, List<string> compareRowData)
+    static void AddRow(IXLWorksheet sheet, int row, string sheetName, List<string> rowData, List<string> compareRowData, int numColumns)
     {
         sheet.Cell(row, 1).Value = sheetName;
-        for (int col = 0; col < rowData.Count; col++)
+        for (int col = 0; col < numColumns; col++)
         {
             var cell = sheet.Cell(row, col + 2);
             cell.Value = rowData[col];
@@ -135,7 +158,7 @@ class Program
 
         if (compareRowData == null)
         {
-            sheet.Range(row, 2, row, 45).Style.Fill.BackgroundColor = XLColor.LightGray;
+            sheet.Range(row, 2, row, numColumns + 1).Style.Fill.BackgroundColor = XLColor.LightGray;
         }
     }
 }
