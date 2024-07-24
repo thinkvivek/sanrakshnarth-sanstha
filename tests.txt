@@ -1,0 +1,2 @@
+INT(MID([Interval Field], FIND([Interval Field], ':') + 1, FIND([Interval Field], ':', FIND([Interval Field], ':') + 1) - FIND([Interval Field], ':') - 1))
+
