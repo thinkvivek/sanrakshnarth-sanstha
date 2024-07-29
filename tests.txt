@@ -1,2 +1,15 @@
 INT(MID([Interval Field], FIND([Interval Field], ':') + 1, FIND([Interval Field], ':', FIND([Interval Field], ':') + 1) - FIND([Interval Field], ':') - 1))
 
+def split_file(file_path, num_parts):
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+
+    total_lines = len(lines)
+    lines_per_part = total_lines // num_parts
+    for i in range(num_parts):
+        part_lines = lines[i * lines_per_part : (i + 1) * lines_per_part]
+        with open(f"part_{i+1}.txt", 'w') as part_file:
+            part_file.writelines(part_lines)
+
+# Usage
+split_file("path/to/your/largefile.txt", 4)
