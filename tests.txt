@@ -39,3 +39,12 @@ split_file("path/to/your/largefile.txt", 4)
   INT(LEFT(SPLIT(SPLIT([Interval], ' ', 3), ':', 3), 2)) * 1000 + 
   INT(MID(SPLIT([Interval], '.', 2), 1, 3))
 )
+
+
+(
+  INT(LEFT([Interval], FIND([Interval], ' ') - 1)) * 24 * 60 * 60 * 1000 + 
+  INT(MID([Interval], FIND([Interval], ' ') + 1, 2)) * 60 * 60 * 1000 + 
+  INT(MID([Interval], FIND([Interval], ':') - 2, 2)) * 60 * 1000 + 
+  INT(MID([Interval], FIND([Interval], ':') + 1, 2)) * 1000 + 
+  INT(MID([Interval], FIND([Interval], '.') + 1, 3))
+)
