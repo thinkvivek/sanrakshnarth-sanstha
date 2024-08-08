@@ -13,3 +13,11 @@ def split_file(file_path, num_parts):
 
 # Usage
 split_file("path/to/your/largefile.txt", 4)
+
+(
+  INT(SPLIT([Interval], ' ', 1)) * 24 * 60 * 60 * 1000 +
+  INT(LEFT(SPLIT([Interval], ' ', 2), FIND(SPLIT([Interval], ' ', 2), ':') - 1)) * 60 * 60 * 1000 +
+  INT(MID(SPLIT([Interval], ' ', 2), FIND(SPLIT([Interval], ' ', 2), ':') + 1, FIND(SPLIT([Interval], ' ', 2), ':', 1) - FIND(SPLIT([Interval], ' ', 2), ':') - 1)) * 60 * 1000 +
+  INT(MID(SPLIT([Interval], ' ', 2), FIND(SPLIT([Interval], ' ', 2), ':', 1) + 1, FIND(SPLIT([Interval], ' ', 2), ':', 2) - FIND(SPLIT([Interval], ' ', 2), ':', 1) - 1)) * 1000 +
+  INT(RIGHT([Interval], LEN([Interval]) - FIND([Interval], ':', 3)))
+)
