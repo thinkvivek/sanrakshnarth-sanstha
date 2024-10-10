@@ -81,3 +81,17 @@ public class SqlTableCreator
         }
     }
 }
+
+
+    private static bool DoesTableExist(SqlConnection connection, string tableName)
+    {
+        string checkTableQuery = @"
+            IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @TableName)
+            SELECT 1 ELSE SELECT 0;";
+
+        using (SqlCommand command = new SqlCommand(checkTableQuery, connection))
+        {
+            command.Parameters.AddWithValue("@TableName", tableName);
+            return (int)command.ExecuteScalar() == 1;
+        }
+    }
