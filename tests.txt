@@ -95,3 +95,56 @@ public class SqlTableCreator
             return (int)command.ExecuteScalar() == 1;
         }
     }
+
+
+
+using System;
+using System.Data;
+using System.IO;
+using System.Text;
+
+public class CsvGenerator
+{
+    public static void GenerateCsvFromDataTable(DataTable dataTable, string filePath)
+    {
+        if (dataTable == null || string.IsNullOrEmpty(filePath))
+            throw new ArgumentNullException("DataTable or filePath cannot be null.");
+
+        StringBuilder sb = new StringBuilder();
+
+        // Writing the header row
+        string[] columnNames = new string[dataTable.Columns.Count];
+        for (int i = 0; i < dataTable.Columns.Count; i++)
+        {
+            columnNames[i] = dataTable.Columns[i].ColumnName;
+        }
+        sb.AppendLine(string.Join(",", columnNames));
+
+        // Writing data rows
+        foreach (DataRow row in dataTable.Rows)
+        {
+            string[] fields = new string[dataTable.Columns.Count];
+            for (int i = 0; i < dataTable.Columns.Count; i++)
+            {
+                fields[i] = QuoteString(row[i].ToString());
+            }
+            sb.AppendLine(string.Join(",", fields));
+        }
+
+        // Writing to file
+        File.WriteAllText(filePath, sb.ToString());
+        Console.WriteLine($"CSV file successfully created at: {filePath}");
+    }
+
+    private static string QuoteString(string value)
+    {
+        if (value.Contains(",") || value.Contains("\"") || value.Contains("\n"))
+        {
+            // Escaping quotes by doubling them
+            value = value.Replace("\"", "\"\"");
+            return $"\"{value}\"";
+        }
+        return value;
+    }
+}
+
