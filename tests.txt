@@ -21,3 +21,63 @@ split_file("path/to/your/largefile.txt", 4)
   INT(MID([Interval], FIND([Interval], ':', FIND([Interval], ':') + 1) + 1, FIND([Interval], '.') - FIND([Interval], ':', FIND([Interval], ':') + 1) - 1)) * 1000 + 
   IFNULL(INT(MID([Interval], FIND([Interval], '.') + 1, 3)), 0)
 )
+
+
+==========================================================================
+
+using System;
+using System.Data;
+using System.Text;
+
+public class SqlTableCreator
+{
+    public static string GenerateCreateTableScript(DataTable dataTable, string tableName)
+    {
+        if (dataTable == null || string.IsNullOrEmpty(tableName))
+            throw new ArgumentNullException("DataTable or TableName cannot be null.");
+
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine($"CREATE TABLE [{tableName}] (");
+
+        for (int i = 0; i < dataTable.Columns.Count; i++)
+        {
+            DataColumn column = dataTable.Columns[i];
+            sb.Append($"    [{column.ColumnName}] {GetSqlDataType(column)}");
+
+            if (!column.AllowDBNull)
+                sb.Append(" NOT NULL");
+
+            if (i < dataTable.Columns.Count - 1)
+                sb.Append(",");
+            
+            sb.AppendLine();
+        }
+
+        sb.AppendLine(");");
+
+        return sb.ToString();
+    }
+
+    private static string GetSqlDataType(DataColumn column)
+    {
+        switch (Type.GetTypeCode(column.DataType))
+        {
+            case TypeCode.Int32:
+                return "INT";
+            case TypeCode.Int64:
+                return "BIGINT";
+            case TypeCode.Decimal:
+                return $"DECIMAL({column.MaxLength > 0 ? column.MaxLength : 18}, 2)";
+            case TypeCode.Double:
+                return "FLOAT";
+            case TypeCode.DateTime:
+                return "DATETIME";
+            case TypeCode.String:
+                return column.MaxLength > 0 ? $"NVARCHAR({column.MaxLength})" : "NVARCHAR(MAX)";
+            case TypeCode.Boolean:
+                return "BIT";
+            default:
+                return "NVARCHAR(MAX)"; // Default to string if unknown type
+        }
+    }
+}
