@@ -12,3 +12,41 @@ with open(file_path, 'r') as infile, open(output_path, 'w') as outfile:
 $rows = Get-Content $filePath
 $invalidRows = $rows | Where-Object { $_ -match '[^\x20-\x7E]' }
 $invalidRows | Out-File "C:\Data\invalidRows.txt"
+
+import re
+
+def find_problematic_rows(file_path, output_path):
+    """
+    Find rows with unexpected newlines or special escape characters.
+
+    :param file_path: Path to the input file.
+    :param output_path: Path to save the problematic rows.
+    """
+    # Define regex to match escape characters other than \n or \r
+    special_char_pattern = re.compile(r'[^\x20-\x7E\r\n]')  # Excludes printable ASCII, \r, and \n
+
+    with open(file_path, 'r') as infile, open(output_path, 'w') as outfile:
+        line_num = 0
+        for line in infile:
+            line_num += 1
+
+            # Check if line contains a newline character not at the end
+            if '\n' in line[:-1] or '\r' in line[:-1]:
+                outfile.write(f"Row {line_num}: Unexpected newline in the middle of the row\n")
+                outfile.write(line)
+                continue
+
+            # Check for special characters
+            if special_char_pattern.search(line):
+                outfile.write(f"Row {line_num}: Special character detected\n")
+                outfile.write(line)
+
+if __name__ == "__main__":
+    # Input and output file paths
+    input_file = "C:/Data/yourfile.txt"
+    output_file = "C:/Data/problematic_rows.txt"
+
+    # Call the function
+    find_problematic_rows(input_file, output_file)
+
+    print(f"Problematic rows have been logged in: {output_file}")
