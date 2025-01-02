@@ -84,3 +84,50 @@ if __name__ == "__main__":
 
     check_and_print_lines(input_file, output_file)
 
+===============================================================
+
+def check_and_print_lines(input_file, output_file, delimiter='|'):
+    """
+    Check a text file for unwanted carriage return characters, ensure line terminations,
+    and print lines with issues to an output file.
+    
+    :param input_file: Path to the input file.
+    :param output_file: Path to save the output file with lines having issues.
+    :param delimiter: Field delimiter (default is pipe `|`).
+    """
+    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+        line_num = 0
+        for line in infile:
+            line_num += 1
+
+            issues_found = False  # Flag to track if any issue is found in this line
+
+            # Check if there is a carriage return (\r) character
+            if '\r' in line:
+                issues_found = True
+                print(f"Carriage return found at line {line_num}: {repr(line)}")
+            
+            # Check if the line ends with a newline character
+            if not line.endswith('\n'):
+                issues_found = True
+                print(f"Missing newline at the end of line {line_num}: {repr(line)}")
+            
+            # Optional: Checking if the row has inconsistent columns
+            columns = line.split(delimiter)
+            expected_column_count = 5  # Update this number based on your file's expected column count
+            if len(columns) != expected_column_count:
+                issues_found = True
+                print(f"Inconsistent number of columns at line {line_num}: {len(columns)} columns, expected {expected_column_count}.")
+
+            # If any issues were found, write the line to the output file
+            if issues_found:
+                outfile.write(line)
+
+    print(f"Lines with issues have been printed to {output_file}.")
+
+
+if __name__ == "__main__":
+    input_file = "C:/Data/yourfile.txt"  # Path to your input file
+    output_file = "C:/Data/output_file_with_issues.txt"  # Path to save output file with problematic lines
+
+    check_and_print_lines(input_file, output_file)
