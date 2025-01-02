@@ -1,52 +1,42 @@
-import re
-
-file_path = "C:/Data/yourfile.txt"
-output_path = "C:/Data/invalidRows.txt"
-
-with open(file_path, 'r') as infile, open(output_path, 'w') as outfile:
-    for i, line in enumerate(infile, start=1):
-        if re.search(r'[^\x20-\x7E]', line):  # Matches non-printable characters
-            outfile.write(f"Line {i}: {line}")
-
-
-$rows = Get-Content $filePath
-$invalidRows = $rows | Where-Object { $_ -match '[^\x20-\x7E]' }
-$invalidRows | Out-File "C:\Data\invalidRows.txt"
-
-import re
-
-def find_problematic_rows(file_path, output_path):
+def split_file(input_file, output_folder, num_parts):
     """
-    Find rows with unexpected newlines or special escape characters.
+    Split a large text file into smaller parts.
 
-    :param file_path: Path to the input file.
-    :param output_path: Path to save the problematic rows.
+    :param input_file: Path to the large input file.
+    :param output_folder: Path to the folder to save split files.
+    :param num_parts: Number of files to split into.
     """
-    # Define regex to match escape characters other than \n or \r
-    special_char_pattern = re.compile(r'[^\x20-\x7E\r\n]')  # Excludes printable ASCII, \r, and \n
+    # Count the total number of rows in the file
+    with open(input_file, 'r') as file:
+        total_lines = sum(1 for _ in file)
 
-    with open(file_path, 'r') as infile, open(output_path, 'w') as outfile:
-        line_num = 0
-        for line in infile:
-            line_num += 1
+    lines_per_part = total_lines // num_parts
+    remainder = total_lines % num_parts
 
-            # Check if line contains a newline character not at the end
-            if '\n' in line[:-1] or '\r' in line[:-1]:
-                outfile.write(f"Row {line_num}: Unexpected newline in the middle of the row\n")
-                outfile.write(line)
-                continue
+    # Open the input file and split it into parts
+    with open(input_file, 'r') as file:
+        for i in range(num_parts):
+            part_file_name = f"{output_folder}/part_{i + 1}.txt"
+            with open(part_file_name, 'w') as part_file:
+                # Add extra line to some parts to accommodate remainder
+                lines_to_write = lines_per_part + (1 if i < remainder else 0)
+                for _ in range(lines_to_write):
+                    line = file.readline()
+                    if not line:
+                        break
+                    part_file.write(line)
 
-            # Check for special characters
-            if special_char_pattern.search(line):
-                outfile.write(f"Row {line_num}: Special character detected\n")
-                outfile.write(line)
+    print(f"File successfully split into {num_parts} parts in {output_folder}")
+
 
 if __name__ == "__main__":
-    # Input and output file paths
-    input_file = "C:/Data/yourfile.txt"
-    output_file = "C:/Data/problematic_rows.txt"
+    input_file = "C:/Data/yourfile.txt"  # Path to the input file
+    output_folder = "C:/Data/SplitFiles"  # Folder where parts will be saved
+    num_parts = 10  # Number of files to split into
 
-    # Call the function
-    find_problematic_rows(input_file, output_file)
+    # Create the output folder if it doesn't exist
+    import os
+    os.makedirs(output_folder, exist_ok=True)
 
-    print(f"Problematic rows have been logged in: {output_file}")
+    # Split the file
+    split_file(input_file, output_folder, num_parts)
