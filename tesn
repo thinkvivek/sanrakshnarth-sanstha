@@ -1,0 +1,14 @@
+import re
+
+file_path = "C:/Data/yourfile.txt"
+output_path = "C:/Data/invalidRows.txt"
+
+with open(file_path, 'r') as infile, open(output_path, 'w') as outfile:
+    for i, line in enumerate(infile, start=1):
+        if re.search(r'[^\x20-\x7E]', line):  # Matches non-printable characters
+            outfile.write(f"Line {i}: {line}")
+
+
+$rows = Get-Content $filePath
+$invalidRows = $rows | Where-Object { $_ -match '[^\x20-\x7E]' }
+$invalidRows | Out-File "C:\Data\invalidRows.txt"
