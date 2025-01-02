@@ -40,3 +40,47 @@ if __name__ == "__main__":
 
     # Split the file
     split_file(input_file, output_folder, num_parts)
+
+
+
+
+def check_and_print_lines(input_file, output_file, delimiter='|'):
+    """
+    Check a text file for unwanted carriage return characters, ensure line terminations,
+    and print lines to a new file.
+    
+    :param input_file: Path to the input file.
+    :param output_file: Path to save the output file with line checks.
+    :param delimiter: Field delimiter (default is pipe `|`).
+    """
+    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
+        line_num = 0
+        for line in infile:
+            line_num += 1
+
+            # Print the line to the new output file (no modifications)
+            outfile.write(line)
+            
+            # Check if there's a carriage return (\r) character
+            if '\r' in line:
+                print(f"Carriage return found at line {line_num}: {repr(line)}")
+
+            # Check if the line ends with newline character
+            if not line.endswith('\n'):
+                print(f"Missing newline at the end of line {line_num}: {repr(line)}")
+
+            # Optional: Checking if the row has inconsistent columns (based on expected count)
+            columns = line.split(delimiter)
+            expected_column_count = 5  # Update this number based on your file's expected column count
+            if len(columns) != expected_column_count:
+                print(f"Inconsistent number of columns at line {line_num}: {len(columns)} columns, expected {expected_column_count}.")
+
+    print(f"Lines have been printed to {output_file}.")
+
+
+if __name__ == "__main__":
+    input_file = "C:/Data/yourfile.txt"  # Path to your input file
+    output_file = "C:/Data/output_file.txt"  # Path to save the output file
+
+    check_and_print_lines(input_file, output_file)
+
