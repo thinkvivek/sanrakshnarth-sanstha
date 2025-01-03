@@ -86,48 +86,50 @@ if __name__ == "__main__":
 
 ===============================================================
 
-def check_and_print_lines(input_file, output_file, delimiter='|'):
-    """
-    Check a text file for unwanted carriage return characters, ensure line terminations,
-    and print lines with issues to an output file.
+import re
+
+def check_special_characters(file_path, log_path):
+    # Regex to detect special characters (includes tab, control chars, and extended ASCII)
+    special_char_pattern = re.compile(r'[\t\x00-\x1F\x7F-\x9F]')
     
-    :param input_file: Path to the input file.
-    :param output_file: Path to save the output file with lines having issues.
-    :param delimiter: Field delimiter (default is pipe `|`).
-    """
-    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
-        line_num = 0
-        for line in infile:
-            line_num += 1
+    line_number = 0
+    has_special_chars = False
 
-            issues_found = False  # Flag to track if any issue is found in this line
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as file, open(log_path, 'w', encoding='utf-8') as log_file:
+            for line in file:
+                line_number += 1
+                
+                # Check for misplaced \r or \n within the line
+                if '\r' in line[:-2] or '\n' in line[:-2]:
+                    has_special_chars = True
+                    log_file.write(f"Misplaced '\\r' or '\\n' found on line {line_number}: {line.strip()}\n")
+                
+                # Strip trailing newline characters
+                trimmed_line = line.rstrip('\r\n')
 
-            # Check if there is a carriage return (\r) character
-            if '\r' in line:
-                issues_found = True
-                print(f"Carriage return found at line {line_num}: {repr(line)}")
-            
-            # Check if the line ends with a newline character
-            if not line.endswith('\n'):
-                issues_found = True
-                print(f"Missing newline at the end of line {line_num}: {repr(line)}")
-            
-            # Optional: Checking if the row has inconsistent columns
-            columns = line.split(delimiter)
-            expected_column_count = 5  # Update this number based on your file's expected column count
-            if len(columns) != expected_column_count:
-                issues_found = True
-                print(f"Inconsistent number of columns at line {line_num}: {len(columns)} columns, expected {expected_column_count}.")
+                # Check for special/escape characters
+                matches = special_char_pattern.findall(trimmed_line)
+                if matches:
+                    has_special_chars = True
+                    unique_chars = set(matches)  # Get unique special characters
+                    char_details = ', '.join([repr(char) for char in unique_chars])  # Convert to readable format
+                    log_file.write(f"Special characters found on line {line_number}: {trimmed_line} | Characters: {char_details}\n")
 
-            # If any issues were found, write the line to the output file
-            if issues_found:
-                outfile.write(line)
+            if not has_special_chars:
+                log_file.write("No special or escape characters found in the file.\n")
+            else:
+                log_file.write("File contains special or escape characters.\n")
 
-    print(f"Lines with issues have been printed to {output_file}.")
+    except FileNotFoundError:
+        print(f"Error: The file {file_path} was not found.")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
 
-
+# Usage Example
 if __name__ == "__main__":
-    input_file = "C:/Data/yourfile.txt"  # Path to your input file
-    output_file = "C:/Data/output_file_with_issues.txt"  # Path to save output file with problematic lines
+    input_file = input("Enter the path to the file to check: ").strip()
+    output_file = input("Enter the path for the log file: ").strip()
+    check_special_characters(input_file, output_file)
+    print(f"Results have been logged to {output_file}.")
 
-    check_and_print_lines(input_file, output_file)
