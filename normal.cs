@@ -15,7 +15,6 @@ namespace ExcelComparer
             public List<object> Values { get; set; }
             public string FileName { get; set; }
             public bool Matched { get; set; }
-            public int MatchScore { get; set; }
         }
 
         // Add column names to exclude from comparison
@@ -43,7 +42,7 @@ namespace ExcelComparer
                 var file2Rows = ReadExcelFile(file2Path, "File2.xlsx");
 
                 ProcessExactMatches(ref file1Rows, ref file2Rows, excludedIndices);
-                var (matchedPairs, singleRows) = FindBestMatches(file1Rows, file2Rows, excludedIndices);
+                var (matchedPairs, singleRows) = FindOptimalMatches(file1Rows, file2Rows, excludedIndices);
 
                 GenerateDiffFile(outputPath, headers, excludedIndices, matchedPairs, singleRows);
                 Console.WriteLine("Comparison completed successfully!");
@@ -122,38 +121,51 @@ namespace ExcelComparer
                 .ToDictionary(g => g.Key, g => g.ToList());
         }
 
-        private static (List<Tuple<RowData, RowData>> matchedPairs, List<RowData> singleRows) FindBestMatches(
+        private static (List<Tuple<RowData, RowData>> matchedPairs, List<RowData> singleRows) FindOptimalMatches(
             List<RowData> file1Rows, List<RowData> file2Rows, List<int> excludedIndices)
         {
-            var matchedPairs = new List<Tuple<RowData, RowData>>();
-            var remainingFile2 = new List<RowData>(file2Rows);
-            var singleRows = new List<RowData>();
+            var allPairs = new List<Tuple<RowData, RowData, int>>();
+            var file1Unmatched = file1Rows.Where(r => !r.Matched).ToList();
+            var file2Unmatched = file2Rows.Where(r => !r.Matched).ToList();
 
-            foreach (var row1 in file1Rows.Where(r => !r.Matched))
+            // Generate all possible pairs with match scores
+            foreach (var row1 in file1Unmatched)
             {
-                var bestMatch = remainingFile2
-                    .Select(row2 => new 
-                    { 
-                        Row = row2, 
-                        Score = CountMatchingColumns(row1.Values, row2.Values, excludedIndices) 
-                    })
-                    .OrderByDescending(x => x.Score)
-                    .FirstOrDefault();
-
-                if (bestMatch != null && bestMatch.Score > 0)
+                foreach (var row2 in file2Unmatched)
                 {
-                    row1.Matched = true;
-                    bestMatch.Row.Matched = true;
-                    matchedPairs.Add(Tuple.Create(row1, bestMatch.Row));
-                    remainingFile2.Remove(bestMatch.Row);
-                }
-                else
-                {
-                    singleRows.Add(row1);
+                    var score = CountMatchingColumns(row1.Values, row2.Values, excludedIndices);
+                    allPairs.Add(Tuple.Create(row1, row2, score));
                 }
             }
 
-            singleRows.AddRange(remainingFile2.Where(r => !r.Matched));
+            // Sort pairs by descending score, then by original row order
+            var sortedPairs = allPairs
+                .OrderByDescending(p => p.Item3)
+                .ThenBy(p => file1Unmatched.IndexOf(p.Item1))
+                .ThenBy(p => file2Unmatched.IndexOf(p.Item2))
+                .ToList();
+
+            var matchedPairs = new List<Tuple<RowData, RowData>>();
+            var matchedFile1 = new HashSet<RowData>();
+            var matchedFile2 = new HashSet<RowData>();
+
+            foreach (var pair in sortedPairs)
+            {
+                if (!matchedFile1.Contains(pair.Item1) && 
+                    !matchedFile2.Contains(pair.Item2) && 
+                    pair.Item3 > 0)
+                {
+                    matchedPairs.Add(Tuple.Create(pair.Item1, pair.Item2));
+                    matchedFile1.Add(pair.Item1);
+                    matchedFile2.Add(pair.Item2);
+                }
+            }
+
+            // Collect remaining unmatched rows
+            var singleRows = file1Rows.Where(r => !matchedFile1.Contains(r))
+                .Concat(file2Rows.Where(r => !matchedFile2.Contains(r)))
+                .ToList();
+
             return (matchedPairs, singleRows);
         }
 
