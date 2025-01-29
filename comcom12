@@ -1,236 +1,231 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing; // Ensure this is included
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using OfficeOpenXml;
 using OfficeOpenXml.Style;
-using CsvHelper;
 
-class Program
+namespace ExcelComparer
 {
-    static void Main(string[] args)
+    public class Program
     {
-        // File paths
-        string file1Path = "File1.xlsx"; // Change to your file path
-        string file2Path = "File2.xlsx"; // Change to your file path
-        string diffFilePath = "diff.xlsx";
-
-        // Load data from files
-        var file1Data = LoadData(file1Path, "File1");
-        var file2Data = LoadData(file2Path, "File2");
-
-        // Get column names from File1
-        var columnNames = GetColumnNames(file1Path);
-
-        // Compare data
-        var diffData = CompareData(file1Data, file2Data);
-
-        // Generate the diff file
-        GenerateDiffFile(diffData, diffFilePath, columnNames);
-
-        Console.WriteLine("Comparison completed. Diff file created at: " + diffFilePath);
-    }
-
-    static List<string> GetColumnNames(string filePath)
-    {
-        var columnNames = new List<string>();
-
-        if (filePath.EndsWith(".xlsx") || filePath.EndsWith(".xls"))
+        public class RowData
         {
-            using (var package = new ExcelPackage(new FileInfo(filePath)))
-            {
-                var worksheet = package.Workbook.Worksheets[0];
-                int colCount = worksheet.Dimension.Columns;
-
-                for (int col = 1; col <= colCount; col++)
-                {
-                    columnNames.Add(worksheet.Cells[1, col].Text);
-                }
-            }
+            public List<object> Values { get; set; }
+            public string FileName { get; set; }
+            public bool Matched { get; set; }
         }
-        else if (filePath.EndsWith(".csv"))
+
+        public static void Main(string[] args)
         {
-            using (var reader = new StreamReader(filePath))
-            using (var csv = new CsvHelper.CsvReader(reader, System.Globalization.CultureInfo.InvariantCulture))
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            const string file1Path = "File1.xlsx";
+            const string file2Path = "File2.xlsx";
+            const string outputPath = "diff.xlsx";
+
+            try
             {
-                csv.Read();
-                csv.ReadHeader();
-                columnNames = csv.HeaderRecord.ToList();
+                var headers = GetHeaders(file1Path);
+                ValidateHeaders(file1Path, file2Path);
+
+                var file1Rows = ReadExcelFile(file1Path, "File1.xlsx");
+                var file2Rows = ReadExcelFile(file2Path, "File2.xlsx");
+
+                ProcessExactMatches(ref file1Rows, ref file2Rows);
+                var (matchedPairs, singleRows) = FindPartialMatches(file1Rows, file2Rows);
+
+                GenerateDiffFile(outputPath, headers, matchedPairs, singleRows);
+                Console.WriteLine("Comparison completed successfully!");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
             }
         }
 
-        return columnNames;
-    }
-
-    static List<RowData> LoadData(string filePath, string fileName)
-    {
-        var data = new List<RowData>();
-
-        if (filePath.EndsWith(".xlsx") || filePath.EndsWith(".xls"))
+        private static List<string> GetHeaders(string filePath)
         {
-            using (var package = new ExcelPackage(new FileInfo(filePath)))
-            {
-                var worksheet = package.Workbook.Worksheets[0];
-                int rowCount = worksheet.Dimension.Rows;
-                int colCount = worksheet.Dimension.Columns;
+            using var package = new ExcelPackage(new FileInfo(filePath));
+            var worksheet = package.Workbook.Worksheets[0];
+            return Enumerable.Range(1, worksheet.Dimension.Columns)
+                .Select(col => worksheet.Cells[1, col].Text)
+                .ToList();
+        }
 
-                for (int row = 2; row <= rowCount; row++) // Skip header row
+        private static void ValidateHeaders(string file1Path, string file2Path)
+        {
+            var headers1 = GetHeaders(file1Path);
+            var headers2 = GetHeaders(file2Path);
+
+            if (!headers1.SequenceEqual(headers2))
+                throw new Exception("Headers in both files do not match.");
+        }
+
+        private static List<RowData> ReadExcelFile(string filePath, string fileName)
+        {
+            var rows = new List<RowData>();
+            using var package = new ExcelPackage(new FileInfo(filePath));
+            var worksheet = package.Workbook.Worksheets[0];
+
+            for (int row = 2; row <= worksheet.Dimension.Rows; row++)
+            {
+                var values = Enumerable.Range(1, worksheet.Dimension.Columns)
+                    .Select(col => worksheet.Cells[row, col].Value)
+                    .ToList();
+
+                rows.Add(new RowData { Values = values, FileName = fileName });
+            }
+            return rows;
+        }
+
+        private static void ProcessExactMatches(ref List<RowData> file1Rows, ref List<RowData> file2Rows)
+        {
+            var file1Groups = GroupRows(file1Rows);
+            var file2Groups = GroupRows(file2Rows);
+
+            foreach (var key in file1Groups.Keys.Intersect(file2Groups.Keys).ToList())
+            {
+                var minCount = Math.Min(file1Groups[key].Count, file2Groups[key].Count);
+                file1Groups[key].RemoveRange(0, minCount);
+                file2Groups[key].RemoveRange(0, minCount);
+            }
+
+            file1Rows = file1Groups.Values.SelectMany(g => g).ToList();
+            file2Rows = file2Groups.Values.SelectMany(g => g).ToList();
+        }
+
+        private static Dictionary<string, List<RowData>> GroupRows(List<RowData> rows)
+        {
+            return rows.GroupBy(r => string.Join("|", r.Values.Select(v => v?.ToString() ?? "")))
+                .ToDictionary(g => g.Key, g => g.ToList());
+        }
+
+        private static (List<Tuple<RowData, RowData>> matchedPairs, List<RowData> singleRows) FindPartialMatches(
+            List<RowData> file1Rows, List<RowData> file2Rows)
+        {
+            var matchedPairs = new List<Tuple<RowData, RowData>>();
+            var singleRows = new List<RowData>();
+            var remainingFile2 = new List<RowData>(file2Rows);
+
+            foreach (var row1 in file1Rows)
+            {
+                if (row1.Matched) continue;
+
+                RowData bestMatch = null;
+                var maxMatches = -1;
+
+                foreach (var row2 in remainingFile2.Where(r => !r.Matched))
                 {
-                    var rowData = new RowData
+                    var matches = CountMatchingColumns(row1.Values, row2.Values);
+                    if (matches > maxMatches)
                     {
-                        FileName = fileName,
-                        Cells = new List<string>()
-                    };
-
-                    for (int col = 1; col <= colCount; col++)
-                    {
-                        rowData.Cells.Add(worksheet.Cells[row, col].Text);
-                    }
-
-                    data.Add(rowData);
-                }
-            }
-        }
-        else if (filePath.EndsWith(".csv"))
-        {
-            using (var reader = new StreamReader(filePath))
-            using (var csv = new CsvHelper.CsvReader(reader, System.Globalization.CultureInfo.InvariantCulture))
-            {
-                while (csv.Read())
-                {
-                    var rowData = new RowData
-                    {
-                        FileName = fileName,
-                        Cells = csv.Parser.Record.ToList()
-                    };
-
-                    data.Add(rowData);
-                }
-            }
-        }
-
-        return data;
-    }
-
-    static List<DiffRow> CompareData(List<RowData> file1Data, List<RowData> file2Data)
-    {
-        var diffData = new List<DiffRow>();
-
-        foreach (var row1 in file1Data)
-        {
-            var maxMatchRow = file2Data
-                .Select(row2 => new
-                {
-                    Row = row2,
-                    MatchCount = row1.Cells.Zip(row2.Cells, (c1, c2) => c1 == c2).Count(match => match)
-                })
-                .OrderByDescending(x => x.MatchCount)
-                .FirstOrDefault();
-
-            if (maxMatchRow == null || maxMatchRow.MatchCount < row1.Cells.Count)
-            {
-                diffData.Add(new DiffRow
-                {
-                    FileName = row1.FileName,
-                    Cells = row1.Cells,
-                    MatchRow = maxMatchRow?.Row,
-                    MatchCount = maxMatchRow?.MatchCount ?? 0
-                });
-            }
-        }
-
-        foreach (var row2 in file2Data)
-        {
-            var maxMatchRow = file1Data
-                .Select(row1 => new
-                {
-                    Row = row1,
-                    MatchCount = row2.Cells.Zip(row1.Cells, (c1, c2) => c1 == c2).Count(match => match)
-                })
-                .OrderByDescending(x => x.MatchCount)
-                .FirstOrDefault();
-
-            if (maxMatchRow == null || maxMatchRow.MatchCount < row2.Cells.Count)
-            {
-                diffData.Add(new DiffRow
-                {
-                    FileName = row2.FileName,
-                    Cells = row2.Cells,
-                    MatchRow = maxMatchRow?.Row,
-                    MatchCount = maxMatchRow?.MatchCount ?? 0
-                });
-            }
-        }
-
-        return diffData;
-    }
-
-    static void GenerateDiffFile(List<DiffRow> diffData, string diffFilePath, List<string> columnNames)
-    {
-        using (var package = new ExcelPackage())
-        {
-            var worksheet = package.Workbook.Worksheets.Add("Diff");
-
-            // Add headers with formatting
-            worksheet.Cells[1, 1].Value = "FileName";
-            worksheet.Cells[1, 1].Style.Font.Bold = true;
-            worksheet.Cells[1, 1].Style.Fill.PatternType = ExcelFillStyle.Solid;
-            worksheet.Cells[1, 1].Style.Fill.BackgroundColor.SetColor(Color.LightGray);
-
-            for (int col = 0; col < columnNames.Count; col++)
-            {
-                worksheet.Cells[1, col + 2].Value = columnNames[col];
-                worksheet.Cells[1, col + 2].Style.Font.Bold = true;
-                worksheet.Cells[1, col + 2].Style.Fill.PatternType = ExcelFillStyle.Solid;
-                worksheet.Cells[1, col + 2].Style.Fill.BackgroundColor.SetColor(Color.LightGray);
-            }
-
-            // Add data
-            int rowIndex = 2;
-            foreach (var diffRow in diffData)
-            {
-                worksheet.Cells[rowIndex, 1].Value = diffRow.FileName;
-
-                for (int col = 0; col < diffRow.Cells.Count; col++)
-                {
-                    worksheet.Cells[rowIndex, col + 2].Value = diffRow.Cells[col];
-
-                    if (diffRow.MatchRow != null && diffRow.Cells[col] != diffRow.MatchRow.Cells[col])
-                    {
-                        worksheet.Cells[rowIndex, col + 2].Style.Fill.PatternType = ExcelFillStyle.Solid;
-                        worksheet.Cells[rowIndex, col + 2].Style.Fill.BackgroundColor.SetColor(Color.Yellow);
+                        maxMatches = matches;
+                        bestMatch = row2;
                     }
                 }
 
-                if (diffRow.MatchCount == 0)
+                if (bestMatch != null && maxMatches < row1.Values.Count)
                 {
-                    for (int col = 1; col <= diffRow.Cells.Count + 1; col++)
-                    {
-                        worksheet.Cells[rowIndex, col].Style.Fill.PatternType = ExcelFillStyle.Solid;
-                        worksheet.Cells[rowIndex, col].Style.Fill.BackgroundColor.SetColor(Color.Orange);
-                    }
+                    row1.Matched = true;
+                    bestMatch.Matched = true;
+                    matchedPairs.Add(Tuple.Create(row1, bestMatch));
+                    remainingFile2.Remove(bestMatch);
                 }
-
-                rowIndex++;
+                else
+                {
+                    singleRows.Add(row1);
+                }
             }
 
-            // Save the file
-            package.SaveAs(new FileInfo(diffFilePath));
+            singleRows.AddRange(remainingFile2.Where(r => !r.Matched));
+            return (matchedPairs, singleRows);
+        }
+
+        private static int CountMatchingColumns(List<object> values1, List<object> values2)
+        {
+            return values1.Zip(values2, (v1, v2) => AreEqual(v1, v2)).Count(match => match);
+        }
+
+        private static bool AreEqual(object val1, object val2)
+        {
+            if (val1 == null && val2 == null) return true;
+            if (val1 == null || val2 == null) return false;
+
+            if (IsNumeric(val1) && IsNumeric(val2))
+                return Convert.ToDouble(val1) == Convert.ToDouble(val2);
+
+            if (val1 is DateTime && val2 is DateTime)
+                return ((DateTime)val1).Equals((DateTime)val2);
+
+            return val1.ToString() == val2.ToString();
+        }
+
+        private static bool IsNumeric(object value)
+        {
+            return value is sbyte || value is byte || value is short || value is ushort ||
+                   value is int || value is uint || value is long || value is ulong ||
+                   value is float || value is double || value is decimal;
+        }
+
+        private static void GenerateDiffFile(string outputPath, List<string> headers,
+            List<Tuple<RowData, RowData>> matchedPairs, List<RowData> singleRows)
+        {
+            using var package = new ExcelPackage();
+            var worksheet = package.Workbook.Worksheets.Add("diff");
+
+            // Create headers
+            var allHeaders = new[] { "FileName" }.Concat(headers).ToList();
+            for (int i = 0; i < allHeaders.Count; i++)
+            {
+                var cell = worksheet.Cells[1, i + 1];
+                cell.Value = allHeaders[i];
+                cell.Style.Font.Bold = true;
+                cell.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                cell.Style.Fill.BackgroundColor.SetColor(Color.LightGray);
+            }
+
+            int currentRow = 2;
+
+            // Add matched pairs
+            foreach (var (row1, row2) in matchedPairs)
+            {
+                AddRow(worksheet, currentRow++, row1, headers, row2);
+                AddRow(worksheet, currentRow++, row2, headers, row1);
+            }
+
+            // Add single rows
+            foreach (var row in singleRows)
+            {
+                AddRow(worksheet, currentRow++, row, headers);
+                using var range = worksheet.Cells[currentRow - 1, 1, currentRow - 1, allHeaders.Count];
+                range.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                range.Style.Fill.BackgroundColor.SetColor(Color.Orange);
+            }
+
+            // Auto-fit columns
+            for (int i = 1; i <= allHeaders.Count; i++)
+                worksheet.Column(i).AutoFit();
+
+            package.SaveAs(new FileInfo(outputPath));
+        }
+
+        private static void AddRow(ExcelWorksheet worksheet, int rowNum, RowData row, 
+            List<string> headers, RowData compareRow = null)
+        {
+            worksheet.Cells[rowNum, 1].Value = row.FileName;
+
+            for (int i = 0; i < headers.Count; i++)
+            {
+                var cell = worksheet.Cells[rowNum, i + 2];
+                cell.Value = row.Values[i];
+
+                if (compareRow != null && !AreEqual(row.Values[i], compareRow.Values[i]))
+                {
+                    cell.Style.Fill.PatternType = ExcelFillStyle.Solid;
+                    cell.Style.Fill.BackgroundColor.SetColor(Color.Yellow);
+                }
+            }
         }
     }
-}
-
-class RowData
-{
-    public string FileName { get; set; }
-    public List<string> Cells { get; set; }
-}
-
-class DiffRow
-{
-    public string FileName { get; set; }
-    public List<string> Cells { get; set; }
-    public RowData MatchRow { get; set; }
-    public int MatchCount { get; set; }
 }
