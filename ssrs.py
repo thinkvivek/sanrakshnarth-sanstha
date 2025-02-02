@@ -1,118 +1,117 @@
 import os
 import xml.etree.ElementTree as ET
 import pandas as pd
-from collections import defaultdict
+from lxml import etree  # Better XML handling
 
-# Enhanced namespace handling
-NAMESPACES = {
-    'rd': 'http://schemas.microsoft.com/SQLServer/reporting/reportdesigner',
-    'd': 'http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition',
-    'df': 'http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition'
-}
-
-def safe_find(element, path, namespace_key='d'):
-    """Safely find XML elements with fallback namespaces"""
-    try:
-        return element.find(path, NAMESPACES)
-    except KeyError:
-        # Try alternative namespace if primary fails
-        return element.find(path.replace(namespace_key, 'df'))
+def get_namespaces(root):
+    """Extract namespaces from XML root"""
+    return {k: v for k, v in root.attrib.items() if k.startswith('xmlns:')}
 
 def parse_rdl(file_path):
-    """Parse RDL file with enhanced error handling"""
-    report_data = defaultdict(list)
-    
+    """Parse RDL with namespace awareness and full CommandText extraction"""
+    result = {
+        'DataSources': [],
+        'DataSets': [],
+        'Errors': []
+    }
+
     try:
-        tree = ET.parse(file_path)
+        # Use lxml parser for better error handling
+        parser = etree.XMLParser(recover=True)
+        tree = etree.parse(file_path, parser)
         root = tree.getroot()
-        
-        # Handle different namespace versions
-        namespaces = {'d': NAMESPACES['d']}
-        if 'Report' in root.tag:
-            for prefix, uri in root.attrib.items():
-                if prefix.startswith('xmlns:'):
-                    namespaces[prefix[6:]] = uri
+        namespaces = get_namespaces(root)
 
-        # Extract Data Sources with null checks
-        for ds in root.findall('.//d:DataSources/d:DataSource', namespaces):
-            ds_name = ds.get('Name')
-            conn_element = safe_find(ds, './/d:ConnectString')
-            
-            report_data['DataSources'].append({
-                'Name': ds_name,
-                'ConnectionString': conn_element.text if conn_element is not None else 'Shared Data Source'
-            })
+        # Find all data sources (including shared ones)
+        for ds in root.findall('.//{http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition}DataSource', namespaces=namespaces):
+            try:
+                ds_name = ds.get('Name')
+                conn_str = ds.find('.//{http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition}ConnectString', namespaces=namespaces)
+                result['DataSources'].append({
+                    'Name': ds_name,
+                    'ConnectionString': conn_str.text if conn_str is not None else 'Shared/External'
+                })
+            except Exception as ds_error:
+                result['Errors'].append(f"DataSourceError: {str(ds_error)}")
 
-        # Extract DataSets with comprehensive checks
-        for dataset in root.findall('.//d:DataSets/d:DataSet', namespaces):
-            ds_name = dataset.get('Name')
-            query = safe_find(dataset, './/d:Query')
-            
-            if query is not None:
-                command = safe_find(query, './/d:CommandText')
-                command_type = safe_find(query, './/d:CommandType')
-            else:
-                command = None
-                command_type = None
+        # Find all datasets with full command text
+        for dataset in root.findall('.//{http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition}DataSet', namespaces=namespaces):
+            try:
+                ds_name = dataset.get('Name')
+                query = dataset.find('.//{http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition}Query', namespaces=namespaces)
+                
+                if query is not None:
+                    command_type = query.find('.//{http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition}CommandType', namespaces=namespaces)
+                    command_text = query.find('.//{http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition}CommandText', namespaces=namespaces)
+                    
+                    # Extract full CommandText with CDATA handling
+                    cmd_text = ''
+                    if command_text is not None:
+                        cmd_text = ''.join(command_text.itertext()).strip()
+                        
+                    result['DataSets'].append({
+                        'Name': ds_name,
+                        'CommandType': command_type.text if command_type is not None else 'Text',
+                        'CommandText': cmd_text
+                    })
+            except Exception as ds_error:
+                result['Errors'].append(f"DataSetError: {str(ds_error)}")
 
-            report_data['DataSets'].append({
-                'DataSetName': ds_name,
-                'CommandType': command_type.text if command_type is not None else 'Text',
-                'CommandText': command.text.strip() if command is not None and command.text else ''
-            })
-
-    except ET.ParseError as e:
-        print(f"XML Parse Error in {file_path}: {str(e)}")
     except Exception as e:
-        print(f"Error processing {file_path}: {str(e)}")
-    
-    return report_data
+        result['Errors'].append(f"FileParseError: {str(e)}")
 
-def process_reports_folder(repo_path):
-    """Process RDL files with debug logging"""
+    return result
+
+def process_reports(repo_path):
+    """Process all RDLs with detailed logging"""
     results = []
-    reports_root = os.path.join(repo_path, 'Reports')
-    
-    for category in os.listdir(reports_root):
-        category_path = os.path.join(reports_root, category)
+    stats = {'processed': 0, 'errors': 0}
+
+    for category in os.listdir(os.path.join(repo_path, 'Reports')):
+        category_path = os.path.join(repo_path, 'Reports', category)
         if not os.path.isdir(category_path):
             continue
 
-        print(f"Processing category: {category}")
-        
         for rdl_file in os.listdir(category_path):
             if not rdl_file.lower().endswith('.rdl'):
                 continue
-                
-            file_path = os.path.join(category_path, rdl_file)
-            print(f"  Parsing: {rdl_file}")
-            
-            report_data = parse_rdl(file_path)
-            
-            # Skip files with parsing errors
-            if not report_data:
-                continue
-                
-            for ds in report_data.get('DataSources', []):
-                for dataset in report_data.get('DataSets', []):
-                    results.append({
-                        'Category': category,
-                        'ReportName': rdl_file,
-                        'DataSource': ds.get('Name', 'Unknown'),
-                        'ConnectionString': ds.get('ConnectionString', 'Not Specified'),
-                        'DataSetName': dataset.get('DataSetName', 'Unknown'),
-                        'CommandType': dataset.get('CommandType', 'Text'),
-                        'CommandText': (dataset.get('CommandText', '')[:500] + '...') 
-                                      if dataset.get('CommandText') else ''
-                    })
 
+            file_path = os.path.join(category_path, rdl_file)
+            stats['processed'] += 1
+            
+            try:
+                report_data = parse_rdl(file_path)
+                
+                # Record even if partial data exists
+                for ds in report_data['DataSources']:
+                    for dataset in report_data['DataSets']:
+                        results.append({
+                            'Category': category,
+                            'Report': rdl_file,
+                            'DataSource': ds['Name'],
+                            'Connection': ds['ConnectionString'],
+                            'DataSet': dataset['Name'],
+                            'CommandType': dataset['CommandType'],
+                            'Query': dataset['CommandText']
+                        })
+                
+                if report_data['Errors']:
+                    stats['errors'] += 1
+                    print(f"Partial parse: {rdl_file}")
+                    for error in report_data['Errors']:
+                        print(f"  - {error}")
+
+            except Exception as e:
+                stats['errors'] += 1
+                print(f"Failed: {rdl_file} - {str(e)}")
+
+    print(f"\nProcessing Complete: {stats['processed']} files, {stats['errors']} errors")
     return pd.DataFrame(results)
 
 # Configuration
-REPO_PATH = '/path/to/your/git/repository'
-OUTPUT_CSV = 'ssrs_report_metadata.csv'
+REPO_PATH = '/path/to/repo'
+OUTPUT_CSV = 'ssrs_analysis.csv'
 
 # Execute
-df = process_reports_folder(REPO_PATH)
-df.to_csv(OUTPUT_CSV, index=False)
-print(f"Successfully processed {len(df)} records")
+df = process_reports(REPO_PATH)
+df.to_csv(OUTPUT_CSV, index=False, encoding='utf-8-sig')
