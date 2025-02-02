@@ -58,6 +58,9 @@ def extract_rdl_info(rdl_file):
                     full_query = re.sub(r"&gt;", ">", full_query)
                     full_query = re.sub(r"&amp;", "&", full_query)
 
+                    # Normalize Windows-style newlines to Unix-style for consistency
+                    full_query = full_query.replace("\r\n", "\n")
+
                 report_data.append({
                     "RDL File": os.path.basename(rdl_file),
                     "DataSource Name": data_source_name,
@@ -86,6 +89,9 @@ with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter="|", quotechar='"', quoting=csv.QUOTE_ALL)
 
     writer.writeheader()
-    writer.writerows(rdl_data)
+    for row in rdl_data:
+        # Ensure the CommandText stays in correct format with preserved newlines
+        row["CommandText"] = row["CommandText"].replace("\n", "\r\n")  # Excel-friendly newlines
+        writer.writerow(row)
 
 print(f"Extraction completed. CSV file saved as {output_csv}")
