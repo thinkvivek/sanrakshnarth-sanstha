@@ -58,8 +58,8 @@ def extract_rdl_info(rdl_file):
                     full_query = re.sub(r"&gt;", ">", full_query)
                     full_query = re.sub(r"&amp;", "&", full_query)
 
-                    # Ensure newlines are preserved correctly
-                    full_query = full_query.replace("\r", "").replace("\n", " ")  # Preserve spaces in CSV
+                    # Preserve newlines by replacing them with `\n` inside CSV
+                    full_query = full_query.replace("\r", "").replace("\n", "\\n")
 
                 report_data.append({
                     "RDL File": os.path.basename(rdl_file),
@@ -83,10 +83,10 @@ for root, dirs, files in os.walk(ssrs_folder):
             rdl_path = os.path.join(root, file)
             rdl_data.extend(extract_rdl_info(rdl_path))
 
-# Write to CSV file
+# Write to Pipe-Delimited CSV file
 with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
     fieldnames = ["RDL File", "DataSource Name", "DataSet Name", "CommandType", "CommandText"]
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter="|", quotechar='"', quoting=csv.QUOTE_MINIMAL)
 
     writer.writeheader()
     writer.writerows(rdl_data)
