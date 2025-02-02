@@ -42,36 +42,48 @@ def parse_rdl(file_path):
             'CommandText': cmd_text.strip() if cmd_text else ''
         })
     
-    return {
-        'ReportName': report_name,
-        'DataSources': report_data['DataSources'],
-        'DataSets': report_data['DataSets']
-    }
+    return report_data
 
 def process_reports_folder(repo_path):
-    """Process all RDL files in repository"""
+    """Process RDL files in Reports/[subfolders] structure"""
     results = []
+    reports_root = os.path.join(repo_path, 'Reports')
     
-    for root_dir, _, files in os.walk(os.path.join(repo_path, 'SSRS')):
-        for file in files:
-            if file.lower().endswith('.rdl'):
-                file_path = os.path.join(root_dir, file)
-                try:
-                    report_data = parse_rdl(file_path)
-                    
-                    # Flatten data for CSV
-                    for ds in report_data['DataSources']:
-                        for dataset in report_data['DataSets']:
-                            results.append({
-                                'ReportName': report_data['ReportName'],
-                                'DataSource': ds['Name'],
-                                'ConnectionString': ds['ConnectionString'],
-                                'DataSetName': dataset['DataSetName'],
-                                'CommandType': dataset['CommandType'],
-                                'CommandText': dataset['CommandText'][:500] + '...' if dataset['CommandText'] else ''  # Truncate long queries
-                            })
-                except ET.ParseError as e:
-                    print(f"Error parsing {file_path}: {str(e)}")
+    if not os.path.exists(reports_root):
+        raise ValueError(f"Reports directory not found at {reports_root}")
+    
+    # Process each subfolder under Reports
+    for category in os.listdir(reports_root):
+        category_path = os.path.join(reports_root, category)
+        
+        if not os.path.isdir(category_path):
+            continue
+            
+        # Process all RDL files in this category folder
+        for rdl_file in os.listdir(category_path):
+            if not rdl_file.lower().endswith('.rdl'):
+                continue
+                
+            file_path = os.path.join(category_path, rdl_file)
+            try:
+                report_data = parse_rdl(file_path)
+                
+                # Flatten data for CSV with category
+                for ds in report_data.get('DataSources', []):
+                    for dataset in report_data.get('DataSets', []):
+                        results.append({
+                            'Category': category,
+                            'ReportName': rdl_file,
+                            'DataSource': ds['Name'],
+                            'ConnectionString': ds['ConnectionString'],
+                            'DataSetName': dataset['DataSetName'],
+                            'CommandType': dataset['CommandType'],
+                            'CommandText': dataset['CommandText'][:500] + '...' if dataset['CommandText'] else ''
+                        })
+            except ET.ParseError as e:
+                print(f"Error parsing {file_path}: {str(e)}")
+            except Exception as e:
+                print(f"Error processing {file_path}: {str(e)}")
     
     return pd.DataFrame(results)
 
@@ -82,4 +94,4 @@ OUTPUT_CSV = 'ssrs_report_metadata.csv'
 # Process reports and save to CSV
 df = process_reports_folder(REPO_PATH)
 df.to_csv(OUTPUT_CSV, index=False)
-print(f"Processed {len(df)} records. Saved to {OUTPUT_CSV}")
+print(f"Processed {len(df)} records from {len(df['Category'].unique())} categories. Saved to {OUTPUT_CSV}")
