@@ -1,6 +1,7 @@
 import os
 import csv
 import xml.etree.ElementTree as ET
+import re
 
 # Path to your SSRS folder (Update this)
 ssrs_folder = "path/to/your/SSRS/folder"
@@ -15,7 +16,11 @@ NAMESPACES = {
 # Function to extract RDL details
 def extract_rdl_info(rdl_file):
     try:
-        tree = ET.parse(rdl_file)
+        with open(rdl_file, "r", encoding="utf-8") as file:
+            xml_content = file.read()  # Read full XML as a string
+        
+        # Parse XML
+        tree = ET.ElementTree(ET.fromstring(xml_content))
         root = tree.getroot()
 
         # Determine correct namespace
@@ -40,9 +45,18 @@ def extract_rdl_info(rdl_file):
                 command_type = query.find("{"+ns+"}CommandType")
                 command_type = command_type.text.strip() if command_type is not None else "Text"
 
-                # Extract Full SQL Query (handles multiline queries)
+                # Extract CommandText (Full SQL Query)
                 command_text = query.find("{"+ns+"}CommandText")
-                full_query = "".join(command_text.itertext()).strip() if command_text is not None else ""
+                full_query = ""
+
+                if command_text is not None:
+                    # Extract raw XML content inside <CommandText>
+                    full_query = ET.tostring(command_text, encoding="utf-8", method="text").decode("utf-8").strip()
+
+                    # Decode XML-escaped characters (e.g., &lt; → <, &gt; → >)
+                    full_query = re.sub(r"&lt;", "<", full_query)
+                    full_query = re.sub(r"&gt;", ">", full_query)
+                    full_query = re.sub(r"&amp;", "&", full_query)
 
                 report_data.append({
                     "RDL File": os.path.basename(rdl_file),
