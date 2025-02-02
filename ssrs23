@@ -2,11 +2,11 @@ import os
 import csv
 import xml.etree.ElementTree as ET
 
-# Path to your SSRS folder (change this to your actual folder path)
+# Path to your SSRS folder (Update this)
 ssrs_folder = "path/to/your/SSRS/folder"
 output_csv = "rdl_extracted_data.csv"
 
-# Namespaces for SSRS RDL files (2010 & 2016 schemas)
+# SSRS XML Namespaces (2010 & 2016 schemas)
 NAMESPACES = {
     'default': 'http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition',
     'data_source': 'http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition'
@@ -36,20 +36,20 @@ def extract_rdl_info(rdl_file):
                 data_source_name = query.find("{"+ns+"}DataSourceName")
                 data_source_name = data_source_name.text.strip() if data_source_name is not None else "Unknown DataSource"
 
-                # Extract CommandType
+                # Extract CommandType (StoredProcedure or Text)
                 command_type = query.find("{"+ns+"}CommandType")
                 command_type = command_type.text.strip() if command_type is not None else "Text"
 
-                # Extract CommandText (Stored Procedure or Inline SQL)
+                # Extract Full SQL Query (handles multiline queries)
                 command_text = query.find("{"+ns+"}CommandText")
-                command_text = command_text.text.strip() if command_text is not None else ""
+                full_query = "".join(command_text.itertext()).strip() if command_text is not None else ""
 
                 report_data.append({
                     "RDL File": os.path.basename(rdl_file),
                     "DataSource Name": data_source_name,
                     "DataSet Name": dataset_name,
                     "CommandType": command_type,
-                    "CommandText": command_text
+                    "CommandText": full_query
                 })
 
         return report_data
