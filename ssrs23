@@ -1,0 +1,69 @@
+import os
+import csv
+import xml.etree.ElementTree as ET
+
+# Path to your SSRS folder (change as needed)
+ssrs_folder = "path/to/your/SSRS/folder"
+output_csv = "rdl_extracted_data.csv"
+
+# Namespaces used in RDL files (2010 & 2016 schemas)
+NAMESPACES = {
+    'default': 'http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition',
+    'data_source': 'http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition'
+}
+
+# Function to extract stored procedures, queries, and connection details
+def extract_rdl_info(rdl_file):
+    try:
+        tree = ET.parse(rdl_file)
+        root = tree.getroot()
+
+        # Determine correct namespace
+        ns = NAMESPACES['default']
+        if root.tag.startswith('{http://schemas.microsoft.com/sqlserver/reporting/2016'):
+            ns = NAMESPACES['data_source']
+
+        # Extract dataset queries
+        queries = []
+        for dataset in root.findall(".//{"+ns+"}Query"):
+            query_text = dataset.find("{"+ns+"}CommandText")
+            if query_text is not None:
+                queries.append(query_text.text.strip())
+
+        # Extract connection details
+        connections = []
+        for datasource in root.findall(".//{"+ns+"}DataSource"):
+            ds_name = datasource.get("Name", "Unknown DataSource")
+            connection_string = datasource.find(".//{"+ns+"}ConnectString")
+            if connection_string is not None:
+                connections.append(f"{ds_name}: {connection_string.text.strip()}")
+
+        return queries, connections
+
+    except Exception as e:
+        print(f"Error processing {rdl_file}: {e}")
+        return [], []
+
+# Collect all RDL files from the SSRS folder
+rdl_data = []
+for root, dirs, files in os.walk(ssrs_folder):
+    for file in files:
+        if file.endswith(".rdl"):
+            rdl_path = os.path.join(root, file)
+            queries, connections = extract_rdl_info(rdl_path)
+
+            rdl_data.append({
+                "RDL File": file,
+                "Stored Procedures / Queries": "; ".join(queries),
+                "Connection Details": "; ".join(connections)
+            })
+
+# Write to CSV file
+with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
+    fieldnames = ["RDL File", "Stored Procedures / Queries", "Connection Details"]
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    
+    writer.writeheader()
+    writer.writerows(rdl_data)
+
+print(f"Extraction completed. CSV file saved as {output_csv}")
