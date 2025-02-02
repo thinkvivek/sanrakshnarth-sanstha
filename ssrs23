@@ -50,13 +50,16 @@ def extract_rdl_info(rdl_file):
                 full_query = ""
 
                 if command_text is not None:
-                    # Extract raw XML content inside <CommandText>
-                    full_query = ET.tostring(command_text, encoding="utf-8", method="text").decode("utf-8").strip()
+                    # Extract full text content including newlines and spaces
+                    full_query = "".join(command_text.itertext()).strip()
 
-                    # Decode XML-escaped characters (e.g., &lt; → <, &gt; → >)
+                    # Decode XML-encoded characters (e.g., &lt; → <, &gt; → >)
                     full_query = re.sub(r"&lt;", "<", full_query)
                     full_query = re.sub(r"&gt;", ">", full_query)
                     full_query = re.sub(r"&amp;", "&", full_query)
+
+                    # Ensure newlines are preserved correctly
+                    full_query = full_query.replace("\r", "").replace("\n", " ")  # Preserve spaces in CSV
 
                 report_data.append({
                     "RDL File": os.path.basename(rdl_file),
