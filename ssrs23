@@ -50,23 +50,20 @@ def extract_rdl_info(rdl_file):
                 full_query = ""
 
                 if command_text is not None:
-                    # Extract full text content including newlines and spaces
+                    # Extract full text content while preserving newlines
                     full_query = "".join(command_text.itertext()).strip()
 
-                    # Decode XML-encoded characters (e.g., &lt; → <, &gt; → >)
+                    # Decode XML-encoded characters
                     full_query = re.sub(r"&lt;", "<", full_query)
                     full_query = re.sub(r"&gt;", ">", full_query)
                     full_query = re.sub(r"&amp;", "&", full_query)
-
-                    # Preserve newlines by replacing them with `\n` inside CSV
-                    full_query = full_query.replace("\r", "").replace("\n", "\\n")
 
                 report_data.append({
                     "RDL File": os.path.basename(rdl_file),
                     "DataSource Name": data_source_name,
                     "DataSet Name": dataset_name,
                     "CommandType": command_type,
-                    "CommandText": full_query
+                    "CommandText": full_query  # Preserve formatting
                 })
 
         return report_data
@@ -86,7 +83,7 @@ for root, dirs, files in os.walk(ssrs_folder):
 # Write to Pipe-Delimited CSV file
 with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
     fieldnames = ["RDL File", "DataSource Name", "DataSet Name", "CommandType", "CommandText"]
-    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter="|", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter="|", quotechar='"', quoting=csv.QUOTE_ALL)
 
     writer.writeheader()
     writer.writerows(rdl_data)
