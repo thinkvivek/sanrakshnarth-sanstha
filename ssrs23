@@ -2,17 +2,17 @@ import os
 import csv
 import xml.etree.ElementTree as ET
 
-# Path to your SSRS folder (change as needed)
+# Path to your SSRS folder (change this to your actual folder path)
 ssrs_folder = "path/to/your/SSRS/folder"
 output_csv = "rdl_extracted_data.csv"
 
-# Namespaces used in RDL files (2010 & 2016 schemas)
+# Namespaces for SSRS RDL files (2010 & 2016 schemas)
 NAMESPACES = {
     'default': 'http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition',
     'data_source': 'http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition'
 }
 
-# Function to extract stored procedures, queries, and connection details
+# Function to extract RDL details
 def extract_rdl_info(rdl_file):
     try:
         tree = ET.parse(rdl_file)
@@ -23,46 +23,54 @@ def extract_rdl_info(rdl_file):
         if root.tag.startswith('{http://schemas.microsoft.com/sqlserver/reporting/2016'):
             ns = NAMESPACES['data_source']
 
-        # Extract dataset queries
-        queries = []
-        for dataset in root.findall(".//{"+ns+"}Query"):
-            query_text = dataset.find("{"+ns+"}CommandText")
-            if query_text is not None:
-                queries.append(query_text.text.strip())
+        report_data = []
 
-        # Extract connection details
-        connections = []
-        for datasource in root.findall(".//{"+ns+"}DataSource"):
-            ds_name = datasource.get("Name", "Unknown DataSource")
-            connection_string = datasource.find(".//{"+ns+"}ConnectString")
-            if connection_string is not None:
-                connections.append(f"{ds_name}: {connection_string.text.strip()}")
+        # Extract DataSets
+        for dataset in root.findall(".//{"+ns+"}DataSet"):
+            dataset_name = dataset.get("Name", "Unknown DataSet")
 
-        return queries, connections
+            # Extract Query inside DataSet
+            query = dataset.find("{"+ns+"}Query")
+            if query is not None:
+                # Extract DataSource Name
+                data_source_name = query.find("{"+ns+"}DataSourceName")
+                data_source_name = data_source_name.text.strip() if data_source_name is not None else "Unknown DataSource"
+
+                # Extract CommandType
+                command_type = query.find("{"+ns+"}CommandType")
+                command_type = command_type.text.strip() if command_type is not None else "Text"
+
+                # Extract CommandText (Stored Procedure or Inline SQL)
+                command_text = query.find("{"+ns+"}CommandText")
+                command_text = command_text.text.strip() if command_text is not None else ""
+
+                report_data.append({
+                    "RDL File": os.path.basename(rdl_file),
+                    "DataSource Name": data_source_name,
+                    "DataSet Name": dataset_name,
+                    "CommandType": command_type,
+                    "CommandText": command_text
+                })
+
+        return report_data
 
     except Exception as e:
         print(f"Error processing {rdl_file}: {e}")
-        return [], []
+        return []
 
-# Collect all RDL files from the SSRS folder
+# Collect all RDL files and extract data
 rdl_data = []
 for root, dirs, files in os.walk(ssrs_folder):
     for file in files:
         if file.endswith(".rdl"):
             rdl_path = os.path.join(root, file)
-            queries, connections = extract_rdl_info(rdl_path)
-
-            rdl_data.append({
-                "RDL File": file,
-                "Stored Procedures / Queries": "; ".join(queries),
-                "Connection Details": "; ".join(connections)
-            })
+            rdl_data.extend(extract_rdl_info(rdl_path))
 
 # Write to CSV file
 with open(output_csv, mode="w", newline="", encoding="utf-8") as csvfile:
-    fieldnames = ["RDL File", "Stored Procedures / Queries", "Connection Details"]
+    fieldnames = ["RDL File", "DataSource Name", "DataSet Name", "CommandType", "CommandText"]
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-    
+
     writer.writeheader()
     writer.writerows(rdl_data)
 
