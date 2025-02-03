@@ -6,9 +6,9 @@ using System.Text.RegularExpressions;
 using System.Linq;
 using System.Text;
 
-namespace AdvancedProcAnalyzer
+namespace UltimateProcAnalyzer
 {
-    class ProcStoryteller
+    class Program
     {
         static void Main(string[] args)
         {
@@ -20,9 +20,10 @@ namespace AdvancedProcAnalyzer
             try
             {
                 string procCode = GetProcedureCode(procName, connectionString);
-                string story = CreateDataStory(procCode);
+                var analysis = AnalyzeProcedure(procCode);
+                string story = GenerateCompleteStory(analysis);
                 
-                Console.WriteLine("\nData Flow Story:");
+                Console.WriteLine("\nCOMPREHENSIVE ANALYSIS REPORT:");
                 Console.WriteLine(story);
             }
             catch (Exception ex)
@@ -33,207 +34,253 @@ namespace AdvancedProcAnalyzer
 
         static string GetProcedureCode(string procName, string connectionString)
         {
-            // Same implementation as previous example
-            // ...
-        }
-
-        static string CreateDataStory(string procCode)
-        {
-            var analysis = new SqlAnalysisResult();
-            
-            AnalyzeStructure(procCode, analysis);
-            DetectComplexFeatures(procCode, analysis);
-            BuildRelationships(analysis);
-
-            return GenerateNarrative(analysis);
-        }
-
-        static void AnalyzeStructure(string code, SqlAnalysisResult result)
-        {
-            // Detect CTEs
-            var cteMatches = Regex.Matches(code, @"WITH\s+([\w_]+)\s+AS\s*\(([^\)]+)\)", 
-                RegexOptions.IgnoreCase | RegexOptions.Singleline);
-            
-            foreach (Match match in cteMatches)
+            using (OracleConnection conn = new OracleConnection(connectionString))
             {
-                result.CTEs.Add(new CommonTableExpression
+                conn.Open();
+                string query = @"SELECT text FROM ALL_SOURCE 
+                               WHERE name = :procName 
+                               AND type = 'PROCEDURE' 
+                               ORDER BY line";
+
+                using (OracleCommand cmd = new OracleCommand(query, conn))
                 {
-                    Name = match.Groups[1].Value,
-                    Definition = match.Groups[2].Value
-                });
-            }
-
-            // Detect main query components
-            var fromClauses = Regex.Matches(code, @"(FROM|JOIN)\s+([\w\.]+)(\s+AS\s+[\w_]+)?", 
-                RegexOptions.IgnoreCase);
-            
-            foreach (Match match in fromClauses)
-            {
-                result.TablesUsed.Add(match.Groups[2].Value.Trim());
-            }
-
-            // Detect window functions
-            var windowFunctions = Regex.Matches(code, @"\b(ROW_NUMBER|RANK|DENSE_RANK|NTILE|LEAD|LAG)\s*\(\s*[^\)]*\s*\)\s+OVER\s*\([^\)]*\)", 
-                RegexOptions.IgnoreCase);
-            
-            foreach (Match match in windowFunctions)
-            {
-                result.WindowFunctions.Add(match.Value);
-            }
-
-            // Detect complex joins
-            var joins = Regex.Matches(code, @"(INNER\s+JOIN|LEFT\s+OUTER\s+JOIN|RIGHT\s+OUTER\s+JOIN|FULL\s+OUTER\s+JOIN|CROSS\s+JOIN)\s+([\w\.]+)", 
-                RegexOptions.IgnoreCase);
-            
-            foreach (Match match in joins)
-            {
-                result.Joins.Add(new SqlJoin
-                {
-                    Type = match.Groups[1].Value.Replace(" OUTER", "").Trim(),
-                    Table = match.Groups[2].Value
-                });
-            }
-        }
-
-        static void DetectComplexFeatures(string code, SqlAnalysisResult result)
-        {
-            // Detect aggregate functions
-            var aggregates = Regex.Matches(code, @"\b(SUM|AVG|COUNT|MIN|MAX)\s*\(\s*([^\)]+)\s*\)", 
-                RegexOptions.IgnoreCase);
-            
-            foreach (Match match in aggregates)
-            {
-                result.Aggregates.Add(new AggregateFunction
-                {
-                    Function = match.Groups[1].Value.ToUpper(),
-                    Column = match.Groups[2].Value.Trim()
-                });
-            }
-
-            // Detect subqueries
-            var subqueries = Regex.Matches(code, @"\(\s*SELECT\s+[^\)]+\)", 
-                RegexOptions.IgnoreCase | RegexOptions.Singleline);
-            
-            result.HasSubqueries = subqueries.Count > 0;
-
-            // Detect transaction control
-            result.HasTransactions = Regex.IsMatch(code, @"\b(COMMIT|ROLLBACK)\b", 
-                RegexOptions.IgnoreCase);
-        }
-
-        static void BuildRelationships(SqlAnalysisResult result)
-        {
-            // Build relationships between CTEs and base tables
-            foreach (var cte in result.CTEs)
-            {
-                foreach (var table in result.TablesUsed)
-                {
-                    if (cte.Definition.Contains(table))
+                    cmd.Parameters.Add("procName", OracleDbType.Varchar2).Value = procName;
+                    
+                    using (OracleDataReader reader = cmd.ExecuteReader())
                     {
-                        cte.BaseTables.Add(table);
+                        StringBuilder codeBuilder = new StringBuilder();
+                        while (reader.Read())
+                        {
+                            codeBuilder.Append(reader["TEXT"].ToString());
+                        }
+                        return codeBuilder.ToString();
                     }
                 }
             }
         }
 
-        static string GenerateNarrative(SqlAnalysisResult analysis)
+        static AnalysisResult AnalyzeProcedure(string procCode)
+        {
+            var result = new AnalysisResult();
+            
+            // Basic Operations Analysis
+            AnalyzeCrudOperations(procCode, result);
+            
+            // Advanced SQL Features
+            AnalyzeQueryStructure(procCode, result);
+            
+            // Procedural Elements
+            AnalyzeProceduralLogic(procCode, result);
+            
+            // Oracle Specific Features
+            AnalyzeOracleSpecifics(procCode, result);
+
+            return result;
+        }
+
+        static void AnalyzeCrudOperations(string code, AnalysisResult result)
+        {
+            var patterns = new Dictionary<string, string>
+            {
+                { "INSERT", @"INSERT\s+(INTO\s+)?([\w\.]+)" },
+                { "UPDATE", @"UPDATE\s+([\w\.]+)" },
+                { "DELETE", @"DELETE\s+(FROM\s+)?([\w\.]+)" },
+                { "SELECT", @"SELECT\s+.+\s+INTO\s+.+\s+FROM\s+([\w\.]+)" }
+            };
+
+            foreach (var pattern in patterns)
+            {
+                var matches = Regex.Matches(code, pattern.Value, 
+                    RegexOptions.IgnoreCase | RegexOptions.Multiline);
+                
+                foreach (Match match in matches)
+                {
+                    string table = match.Groups[match.Groups.Count - 1].Value.Trim();
+                    if (!string.IsNullOrEmpty(table))
+                    {
+                        result.RecordOperation(pattern.Key, table);
+                    }
+                }
+            }
+        }
+
+        static void AnalyzeQueryStructure(string code, AnalysisResult result)
+        {
+            // CTEs
+            var cteMatches = Regex.Matches(code, @"WITH\s+([\w_]+)\s+AS\s*\(([^\)]+)\)", 
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            foreach (Match match in cteMatches)
+            {
+                result.CTEs.Add(new CteInfo {
+                    Name = match.Groups[1].Value,
+                    Definition = match.Groups[2].Value
+                });
+            }
+
+            // Joins
+            var joins = Regex.Matches(code, @"(JOIN)\s+([\w\.]+)", RegexOptions.IgnoreCase);
+            foreach (Match match in joins)
+            {
+                result.Joins.Add(match.Groups[2].Value.Trim());
+            }
+
+            // Window Functions
+            var windowFuncs = Regex.Matches(code, @"\b(ROW_NUMBER|RANK|DENSE_RANK|NTILE|LEAD|LAD)\s*\([^\)]*\)\s+OVER\s*\([^\)]*\)", 
+                RegexOptions.IgnoreCase);
+            result.WindowFunctions.AddRange(windowFuncs.Cast<Match>().Select(m => m.Value));
+
+            // Set Operations
+            var setOps = Regex.Matches(code, @"\b(UNION|INTERSECT|MINUS)(\s+ALL)?\b", RegexOptions.IgnoreCase);
+            foreach (Match match in setOps)
+            {
+                result.SetOperations.Add(new SetOperation {
+                    Type = match.Groups[1].Value.ToUpper(),
+                    AllModifier = match.Groups[2].Success
+                });
+            }
+        }
+
+        static void AnalyzeProceduralLogic(string code, AnalysisResult result)
+        {
+            // Cursors
+            var cursors = Regex.Matches(code, @"\bCURSOR\s+(\w+)\s+IS\s+SELECT", RegexOptions.IgnoreCase);
+            foreach (Match match in cursors)
+            {
+                result.Cursors.Add(new CursorInfo { Name = match.Groups[1].Value });
+            }
+
+            // Loops
+            var loops = Regex.Matches(code, @"\b(LOOP|FOR\s+.*?\s+IN|WHILE)\b", RegexOptions.IgnoreCase);
+            result.LoopCount = loops.Count;
+
+            // CASE Statements
+            result.CaseStatements = Regex.Matches(code, @"\bCASE\b", RegexOptions.IgnoreCase).Count;
+        }
+
+        static void AnalyzeOracleSpecifics(string code, AnalysisResult result)
+        {
+            // Oracle Functions
+            var oraFuncs = Regex.Matches(code, @"\b(NVL|DECODE|TO_DATE|TO_CHAR|LISTAGG)\s*\(", RegexOptions.IgnoreCase);
+            result.OracleFunctions.AddRange(oraFuncs.Cast<Match>().Select(m => m.Groups[1].Value.ToUpper()));
+
+            // Bulk Operations
+            result.HasBulkOperations = Regex.IsMatch(code, @"\bBULK\s+COLLECT\b", RegexOptions.IgnoreCase);
+        }
+
+        static string GenerateCompleteStory(AnalysisResult analysis)
         {
             var story = new StringBuilder();
             
-            story.AppendLine("Data Processing Story:");
-            story.AppendLine("----------------------");
-
-            if (analysis.CTEs.Any())
+            story.AppendLine("DATA PROCESSING NARRATIVE");
+            story.AppendLine("=========================");
+            
+            story.AppendLine("\n1. Data Sources & Transformations:");
+            story.AppendLine($"- Works with {analysis.Tables.Count} main tables: {FormatList(analysis.Tables)}");
+            if (analysis.CTEs.Count > 0)
             {
-                story.AppendLine("The process begins by setting up temporary datasets:");
+                story.AppendLine("- Creates temporary datasets using:");
                 foreach (var cte in analysis.CTEs)
                 {
-                    story.AppendLine($"- '{cte.Name}' created using {ListFormatter.Format(cte.BaseTables)}");
+                    story.AppendLine($"  * {cte.Name} based on {FormatList(cte.BaseTables)}");
                 }
-                story.AppendLine();
             }
 
-            story.AppendLine("Main operations include:");
-            story.AppendLine($"- Working with {ListFormatter.Format(analysis.TablesUsed.Distinct())}");
-            
-            if (analysis.Joins.Any())
+            story.AppendLine("\n2. Data Manipulation:");
+            story.AppendLine("- Performs these operations:");
+            foreach (var op in analysis.Operations)
             {
-                story.AppendLine("- Combining data through:");
-                foreach (var join in analysis.Joins)
-                {
-                    story.AppendLine($"  * {join.Type} with {join.Table}");
-                }
+                story.AppendLine($"  * {op.Key} on {FormatList(op.Value)}");
             }
 
-            if (analysis.Aggregates.Any())
+            story.AppendLine("\n3. Advanced Processing:");
+            if (analysis.WindowFunctions.Count > 0)
             {
-                story.AppendLine("\nCalculations performed:");
-                foreach (var agg in analysis.Aggregates)
-                {
-                    story.AppendLine($"- {agg.Function} of {agg.Column}");
-                }
+                story.AppendLine("- Uses analytical functions for:");
+                story.AppendLine($"  {FormatList(analysis.WindowFunctions.Distinct())}");
             }
-
-            if (analysis.WindowFunctions.Any())
+            if (analysis.SetOperations.Count > 0)
             {
-                story.AppendLine("\nAdvanced analysis includes:");
-                story.AppendLine("- Ranking and window-based calculations using:");
-                foreach (var wf in analysis.WindowFunctions.Distinct())
-                {
-                    story.AppendLine($"  * {wf.Split('(')[0].Trim()} operations");
-                }
+                story.AppendLine("- Combines data sets using:");
+                story.AppendLine($"  {FormatList(analysis.SetOperations.Select(so => so.ToString()))}");
             }
 
-            story.AppendLine("\nFinal Steps:");
-            story.AppendLine(analysis.HasTransactions ? 
-                "- Uses transactions to ensure data consistency" : 
-                "- Runs in auto-commit mode");
+            story.AppendLine("\n4. Business Logic Implementation:");
+            if (analysis.Cursors.Count > 0)
+            {
+                story.AppendLine("- Processes data sequentially using:");
+                story.AppendLine($"  {FormatList(analysis.Cursors.Select(c => c.Name))}");
+            }
+            if (analysis.LoopCount > 0)
+            {
+                story.AppendLine($"- Contains {analysis.LoopCount} iterative processing blocks");
+            }
+            if (analysis.CaseStatements > 0)
+            {
+                story.AppendLine($"- Implements {analysis.CaseStatements} conditional decision points");
+            }
+
+            story.AppendLine("\n5. Oracle-Specific Features:");
+            story.AppendLine($"- Uses special functions: {FormatList(analysis.OracleFunctions.Distinct())}");
+            story.AppendLine(analysis.HasBulkOperations ? 
+                "- Employs bulk data operations for efficiency" : 
+                "- Uses standard row-by-row processing");
 
             return story.ToString();
         }
+
+        static string FormatList(IEnumerable<string> items)
+        {
+            var list = items.ToList();
+            if (list.Count == 0) return "none";
+            if (list.Count == 1) return list[0];
+            return string.Join(", ", list.Take(list.Count - 1)) + " and " + list.Last();
+        }
     }
 
-    // Helper classes
-    class SqlAnalysisResult
+    class AnalysisResult
     {
-        public List<string> TablesUsed { get; } = new List<string>();
-        public List<CommonTableExpression> CTEs { get; } = new List<CommonTableExpression>();
-        public List<SqlJoin> Joins { get; } = new List<SqlJoin>();
+        public HashSet<string> Tables { get; } = new HashSet<string>();
+        public Dictionary<string, List<string>> Operations { get; } = new Dictionary<string, List<string>>();
+        public List<CteInfo> CTEs { get; } = new List<CteInfo>();
+        public List<string> Joins { get; } = new List<string>();
         public List<string> WindowFunctions { get; } = new List<string>();
-        public List<AggregateFunction> Aggregates { get; } = new List<AggregateFunction>();
-        public bool HasSubqueries { get; set; }
-        public bool HasTransactions { get; set; }
+        public List<SetOperation> SetOperations { get; } = new List<SetOperation>();
+        public List<CursorInfo> Cursors { get; } = new List<CursorInfo>();
+        public int LoopCount { get; set; }
+        public int CaseStatements { get; set; }
+        public List<string> OracleFunctions { get; } = new List<string>();
+        public bool HasBulkOperations { get; set; }
+
+        public void RecordOperation(string operation, string table)
+        {
+            if (!Operations.ContainsKey(operation))
+                Operations[operation] = new List<string>();
+            
+            Operations[operation].Add(table);
+            Tables.Add(table);
+        }
     }
 
-    class CommonTableExpression
+    class CteInfo
     {
         public string Name { get; set; }
         public string Definition { get; set; }
-        public List<string> BaseTables { get; } = new List<string>();
+        public List<string> BaseTables => Definition.Split(new[] {' '}, StringSplitOptions.RemoveEmptyEntries)
+            .Where(word => word.Contains("."))
+            .Select(table => table.Split('.')[1])
+            .ToList();
     }
 
-    class SqlJoin
+    class SetOperation
     {
         public string Type { get; set; }
-        public string Table { get; set; }
+        public bool AllModifier { get; set; }
+
+        public override string ToString() => $"{Type}{(AllModifier ? " ALL" : "")}";
     }
 
-    class AggregateFunction
+    class CursorInfo
     {
-        public string Function { get; set; }
-        public string Column { get; set; }
-    }
-
-    static class ListFormatter
-    {
-        public static string Format(IEnumerable<string> items)
-        {
-            var list = items.ToList();
-            if (list.Count == 0) return "";
-            if (list.Count == 1) return list[0];
-            
-            return string.Join(", ", list.Take(list.Count - 1)) + 
-                   " and " + list.Last();
-        }
+        public string Name { get; set; }
     }
 }
