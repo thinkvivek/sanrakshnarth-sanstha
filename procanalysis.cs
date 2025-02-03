@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
-namespace GenericSqlAnalyzer
+namespace GenericStoredProcedureNarrative
 {
     public partial class MainForm : Form
     {
@@ -12,328 +12,195 @@ namespace GenericSqlAnalyzer
             InitializeComponent();
         }
 
-        // Triggered when the Analyze button is clicked.
+        // Event handler when the Analyze button is clicked.
         private void btnAnalyze_Click(object sender, EventArgs e)
         {
             string sqlInput = txtInput.Text;
             if (string.IsNullOrWhiteSpace(sqlInput))
             {
-                MessageBox.Show("Please enter a SQL stored procedure or query.", "Input Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Please enter a stored procedure or SQL query.", "Input Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            string analysisReport = GenerateGenericDetailedAnalysisReport(sqlInput);
-            txtOutput.Text = analysisReport;
+            // Generate a narrative explanation of the stored procedure.
+            string narrative = GenerateNarrativeExplanation(sqlInput);
+            txtOutput.Text = narrative;
         }
 
         /// <summary>
-        /// Generates a detailed analysis report for any SQL stored procedure or query.
+        /// Generates a narrative explanation for any stored procedure or SQL query.
+        /// This method attempts to generate a "story" that explains the overall logic of the SQL.
         /// </summary>
         /// <param name="sql">The SQL text input.</param>
-        /// <returns>A detailed analysis report string.</returns>
-        private string GenerateGenericDetailedAnalysisReport(string sql)
+        /// <returns>A narrative explanation string.</returns>
+        private string GenerateNarrativeExplanation(string sql)
         {
-            StringBuilder report = new StringBuilder();
+            StringBuilder narrative = new StringBuilder();
+            string normalizedSql = sql.Trim();
 
-            // I. Overview Section
-            report.AppendLine("### Detailed SQL Analysis Report");
-            report.AppendLine();
-            report.AppendLine("#### I. Overview of the SQL Input");
-            report.AppendLine();
-            report.AppendLine("- **Purpose:** This tool analyzes the SQL code and attempts to describe its overall structure and functionality.");
-            report.AppendLine("- **SQL Type:** " + IdentifySqlType(sql));
-            report.AppendLine("- **Final Outcome:** The analysis highlights key components such as CTEs, main queries, tables used, joins, grouping, aggregations, and any procedural constructs.");
-            report.AppendLine();
+            narrative.AppendLine("### SQL Narrative Explanation");
+            narrative.AppendLine();
 
-            // II. Breakdown by Components
-            report.AppendLine("#### II. Detailed Breakdown");
-            report.AppendLine();
+            // Identify the type of SQL (Stored Procedure, SELECT, INSERT, etc.)
+            string sqlType = IdentifySqlType(normalizedSql);
+            narrative.AppendLine($"**SQL Type:** {sqlType}");
+            narrative.AppendLine();
 
-            // A. Detect Common Table Expressions (CTEs)
-            var cteReports = AnalyzeCTEs(sql);
-            if (!string.IsNullOrEmpty(cteReports))
+            // For stored procedures, try to provide a story for the overall structure.
+            if (sqlType == "Stored Procedure")
             {
-                report.AppendLine(cteReports);
+                narrative.AppendLine("This stored procedure appears to contain procedural logic combined with one or more SQL statements. Below is a high-level narrative of its structure:");
+                narrative.AppendLine();
             }
             else
             {
-                report.AppendLine("**CTE Analysis:** No common table expressions (CTEs) were detected.");
+                narrative.AppendLine("This SQL query appears to be a standalone query. Here is a narrative of its main parts:");
+                narrative.AppendLine();
             }
-            report.AppendLine();
 
-            // B. Main SELECT / DML / Procedure Body Analysis
-            report.AppendLine("**Main Query / Procedure Analysis:**");
-            report.AppendLine();
-
-            // Extract SELECT block (if present) for further analysis
-            string selectBlock = ExtractSelectBlock(sql);
-            if (!string.IsNullOrEmpty(selectBlock))
+            // Check for Common Table Expressions (CTEs)
+            if (Regex.IsMatch(normalizedSql, @"^\s*WITH", RegexOptions.IgnoreCase))
             {
-                report.AppendLine("**Main SELECT Statement:**");
-                report.AppendLine("```sql");
-                report.AppendLine(selectBlock);
-                report.AppendLine("```");
-                report.AppendLine();
-                report.AppendLine(AnalyzeSelectBlock(selectBlock));
+                narrative.AppendLine("1. **Common Table Expressions (CTEs) Detected:**");
+                narrative.AppendLine("   The query uses one or more CTEs (defined using the WITH clause) to organize complex logic into smaller, reusable parts.");
+                narrative.AppendLine("   - For example, one CTE might perform a self-join on a table to pre-process data, while another might aggregate or filter that data.");
+                narrative.AppendLine();
             }
             else
             {
-                // If not a SELECT, check for other DML (INSERT, UPDATE, DELETE) or procedure structure.
-                report.AppendLine(AnalyzeNonSelect(sql));
+                narrative.AppendLine("1. **No CTEs Detected:**");
+                narrative.AppendLine("   The query does not appear to use common table expressions. The logic is likely contained in one or more standalone SQL statements.");
+                narrative.AppendLine();
             }
-            report.AppendLine();
 
-            // C. Analyze Procedural or Loop Constructs (if any)
-            string proceduralAnalysis = AnalyzeProceduralElements(sql);
-            if (!string.IsNullOrEmpty(proceduralAnalysis))
+            // Look for multiple SELECT statements or query blocks
+            int selectCount = Regex.Matches(normalizedSql, @"\bSELECT\b", RegexOptions.IgnoreCase).Count;
+            narrative.AppendLine($"2. **Main Query Blocks:**");
+            if (selectCount > 1)
             {
-                report.AppendLine("**Procedural / Control Flow Analysis:**");
-                report.AppendLine(proceduralAnalysis);
+                narrative.AppendLine($"   There appear to be {selectCount} main SELECT statements or query blocks. This suggests that the procedure breaks the logic into multiple steps.");
+            }
+            else if (selectCount == 1)
+            {
+                narrative.AppendLine("   There is a single main SELECT statement in the procedure.");
             }
             else
             {
-                report.AppendLine("**Procedural / Control Flow Analysis:** No procedural constructs (loops, cursors, etc.) were detected.");
+                narrative.AppendLine("   No SELECT statements were found; the procedure might be performing DML operations (INSERT, UPDATE, DELETE) or purely procedural work.");
             }
-            report.AppendLine();
+            narrative.AppendLine();
 
-            // III. Summary of Detected SQL Components
-            report.AppendLine("#### III. Summary of Detected Components");
-            report.AppendLine();
-            report.AppendLine(GenerateComponentSummary(sql));
-            report.AppendLine();
+            // Analyze common parts (self-joins, aggregations, concatenations, etc.)
+            if (Regex.IsMatch(normalizedSql, @"\bJOIN\b", RegexOptions.IgnoreCase))
+            {
+                narrative.AppendLine("3. **JOIN Operations:**");
+                narrative.AppendLine("   The procedure uses JOINs to combine data from multiple tables. This is typically done to correlate data across related tables.");
+                narrative.AppendLine();
+            }
 
-            // IV. Example / Hypothetical Output (if applicable)
-            report.AppendLine("#### IV. Example / Hypothetical Output");
-            report.AppendLine();
-            report.AppendLine("If sample data were provided, the tool could simulate expected results based on the analysis above. This section is a placeholder for sample output demonstration.");
-            report.AppendLine();
+            if (Regex.IsMatch(normalizedSql, @"\bGROUP\s+BY\b", RegexOptions.IgnoreCase))
+            {
+                narrative.AppendLine("4. **Grouping and Aggregation:**");
+                narrative.AppendLine("   The query includes a GROUP BY clause along with aggregate functions (such as COUNT, SUM, etc.) to summarize data across groups.");
+                narrative.AppendLine();
+            }
 
-            // V. Conclusion
-            report.AppendLine("#### V. Conclusion");
-            report.AppendLine();
-            report.AppendLine("This SQL analysis report summarizes the structure, purpose, and key components of the provided SQL code. It is designed to help understand the flow and output of the SQL stored procedure or query.");
-            report.AppendLine();
+            if (Regex.IsMatch(normalizedSql, @"\bCONCAT|[+]\b", RegexOptions.IgnoreCase))
+            {
+                narrative.AppendLine("5. **Data Concatenation or Formatting:**");
+                narrative.AppendLine("   The procedure uses concatenation functions to combine fields (for example, concatenating product names) to form readable outputs.");
+                narrative.AppendLine();
+            }
 
-            return report.ToString();
+            // Check for procedural constructs such as loops, cursors, or conditional statements
+            if (Regex.IsMatch(normalizedSql, @"\bFOR\s+.+\bLOOP\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(normalizedSql, @"\bWHILE\b", RegexOptions.IgnoreCase))
+            {
+                narrative.AppendLine("6. **Procedural Constructs (Loops):**");
+                narrative.AppendLine("   The stored procedure contains loop constructs (FOR or WHILE loops) to iterate over sets of data or perform repeated operations.");
+                narrative.AppendLine();
+            }
+
+            if (Regex.IsMatch(normalizedSql, @"\bCURSOR\b", RegexOptions.IgnoreCase))
+            {
+                narrative.AppendLine("7. **Cursor Usage:**");
+                narrative.AppendLine("   The procedure uses cursors to process query results row-by-row, which is common in procedural SQL code.");
+                narrative.AppendLine();
+            }
+
+            if (Regex.IsMatch(normalizedSql, @"\bIF\s+.+\bTHEN\b", RegexOptions.IgnoreCase))
+            {
+                narrative.AppendLine("8. **Conditional Logic:**");
+                narrative.AppendLine("   The procedure includes IF statements to conditionally execute code based on certain criteria.");
+                narrative.AppendLine();
+            }
+
+            // Now, try to provide a holistic narrative combining these elements.
+            narrative.AppendLine("### Holistic Narrative");
+            narrative.AppendLine();
+            narrative.AppendLine("Based on the analysis, here is a high-level narrative of the stored procedure:");
+            narrative.AppendLine();
+
+            // Build the narrative story based on some detected elements.
+            if (Regex.IsMatch(normalizedSql, @"^\s*WITH", RegexOptions.IgnoreCase))
+            {
+                narrative.AppendLine("The stored procedure starts by defining one or more Common Table Expressions (CTEs) using the WITH clause. ");
+                narrative.AppendLine("For example, the first CTE might perform a self-join on a table (such as `cust_orders`) to pair rows from the same order while removing duplicates (by comparing product IDs). ");
+                narrative.AppendLine("The next CTE could then group these pairs and calculate how many times each pair occurs, effectively determining the frequency of product pairings.");
+            }
+            else
+            {
+                narrative.AppendLine("The stored procedure does not use CTEs, suggesting that its logic is contained within a single query or a series of procedural steps.");
+            }
+
+            narrative.AppendLine();
+            narrative.AppendLine("Next, the main body of the procedure performs one or more SELECT operations. ");
+            narrative.AppendLine("If multiple SELECT statements are present, each represents a distinct step in the overall logic. ");
+            narrative.AppendLine("For instance, one SELECT might retrieve raw data, another might aggregate or filter that data, and a final SELECT could join additional tables (such as a `products` table) to enrich the results with human-readable names or other details.");
+            narrative.AppendLine();
+            narrative.AppendLine("Furthermore, the procedure may include procedural constructs such as loops or conditional statements to iterate over data or make decisions based on dynamic conditions. ");
+            narrative.AppendLine("This combination of declarative SQL for data retrieval and procedural logic for control flow makes the stored procedure both powerful and flexible in handling complex business logic.");
+            narrative.AppendLine();
+            narrative.AppendLine("### Conclusion");
+            narrative.AppendLine("In summary, this stored procedure is designed to process and transform data in multiple steps. ");
+            narrative.AppendLine("It leverages CTEs to modularize its logic, performs JOINs and aggregations to combine and summarize data, and finally enriches the output by formatting the data (such as concatenating values). ");
+            narrative.AppendLine("The use of loops, cursors, and conditional statements (if present) further indicates that the procedure handles more complex, row-by-row processing or conditional business logic.");
+            narrative.AppendLine();
+            narrative.AppendLine("This narrative provides a holistic understanding of the procedure's structure and purpose, regardless of the specific details of the SQL code.");
+
+            return narrative.ToString();
         }
 
         /// <summary>
-        /// Identifies the type of SQL (SELECT, INSERT, UPDATE, DELETE, or a Stored Procedure).
+        /// Identifies the type of SQL based on certain keywords.
         /// </summary>
         private string IdentifySqlType(string sql)
         {
             string upperSql = sql.ToUpper();
-            if (upperSql.Contains("CREATE PROCEDURE") || upperSql.Contains("CREATE PROC") || upperSql.Contains("ALTER PROCEDURE"))
+            if (upperSql.Contains("CREATE PROCEDURE") ||
+                upperSql.Contains("CREATE PROC") ||
+                upperSql.Contains("ALTER PROCEDURE") ||
+                upperSql.Contains("ALTER PROC"))
+            {
                 return "Stored Procedure";
+            }
             if (upperSql.Contains("SELECT"))
+            {
                 return "SELECT Query";
+            }
             if (upperSql.Contains("INSERT"))
+            {
                 return "INSERT Query";
+            }
             if (upperSql.Contains("UPDATE"))
+            {
                 return "UPDATE Query";
+            }
             if (upperSql.Contains("DELETE"))
+            {
                 return "DELETE Query";
+            }
             return "Unknown Type";
-        }
-
-        /// <summary>
-        /// Analyzes and extracts CTEs from the SQL.
-        /// </summary>
-        private string AnalyzeCTEs(string sql)
-        {
-            StringBuilder cteReport = new StringBuilder();
-            // Look for a WITH clause at the start
-            Regex withRegex = new Regex(@"WITH\s+(?<ctes>.*?)(?=SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|$)", RegexOptions.Singleline | RegexOptions.IgnoreCase);
-            Match withMatch = withRegex.Match(sql);
-            if (withMatch.Success)
-            {
-                string cteBlock = withMatch.Groups["ctes"].Value.Trim();
-                // Split individual CTEs if there are commas at the top level.
-                // (A simple split by "),", then reappend a closing parenthesis.)
-                string[] cteParts = Regex.Split(cteBlock, @"\),", RegexOptions.IgnoreCase);
-                int cteIndex = 1;
-                foreach (string part in cteParts)
-                {
-                    string trimmedPart = part.Trim();
-                    if (!string.IsNullOrEmpty(trimmedPart))
-                    {
-                        // Append missing closing parenthesis if it was removed during splitting.
-                        if (!trimmedPart.EndsWith(")"))
-                        {
-                            trimmedPart += ")";
-                        }
-                        cteReport.AppendLine($"**CTE #{cteIndex}:**");
-                        cteReport.AppendLine("```sql");
-                        cteReport.AppendLine(trimmedPart);
-                        cteReport.AppendLine("```");
-                        cteReport.AppendLine("- This CTE is used to pre-process data. Its inner logic may involve joins, filtering, or aggregation.");
-                        cteReport.AppendLine();
-                        cteIndex++;
-                    }
-                }
-            }
-            return cteReport.ToString();
-        }
-
-        /// <summary>
-        /// Extracts the main SELECT block from the SQL (if present).
-        /// </summary>
-        private string ExtractSelectBlock(string sql)
-        {
-            Regex selectRegex = new Regex(@"SELECT\s+.*", RegexOptions.Singleline | RegexOptions.IgnoreCase);
-            Match selectMatch = selectRegex.Match(sql);
-            if (selectMatch.Success)
-            {
-                return selectMatch.Value.Trim();
-            }
-            return string.Empty;
-        }
-
-        /// <summary>
-        /// Analyzes the main SELECT block to extract information about tables, joins, aggregates, etc.
-        /// </summary>
-        private string AnalyzeSelectBlock(string selectBlock)
-        {
-            StringBuilder analysis = new StringBuilder();
-
-            // Detect tables from FROM clauses
-            analysis.AppendLine("**Tables / Sources Detected:**");
-            Regex fromRegex = new Regex(@"\bFROM\s+([a-zA-Z0-9_\[\]\.]+)", RegexOptions.IgnoreCase);
-            MatchCollection fromMatches = fromRegex.Matches(selectBlock);
-            if (fromMatches.Count > 0)
-            {
-                foreach (Match match in fromMatches)
-                {
-                    analysis.AppendLine($"- {match.Groups[1].Value}");
-                }
-            }
-            else
-            {
-                analysis.AppendLine("- No FROM clause detected.");
-            }
-            analysis.AppendLine();
-
-            // Detect JOIN operations
-            analysis.AppendLine("**JOINs Detected:**");
-            Regex joinRegex = new Regex(@"\bJOIN\s+([a-zA-Z0-9_\[\]\.]+)", RegexOptions.IgnoreCase);
-            MatchCollection joinMatches = joinRegex.Matches(selectBlock);
-            if (joinMatches.Count > 0)
-            {
-                foreach (Match match in joinMatches)
-                {
-                    analysis.AppendLine($"- {match.Groups[1].Value}");
-                }
-            }
-            else
-            {
-                analysis.AppendLine("- No JOIN operations detected.");
-            }
-            analysis.AppendLine();
-
-            // Detect grouping and aggregates
-            if (Regex.IsMatch(selectBlock, @"\bGROUP\s+BY\b", RegexOptions.IgnoreCase))
-            {
-                analysis.AppendLine("**Grouping Detected:** A GROUP BY clause was found.");
-            }
-            if (Regex.IsMatch(selectBlock, @"\b(AVG|COUNT|SUM|MIN|MAX)\s*\(", RegexOptions.IgnoreCase))
-            {
-                analysis.AppendLine("**Aggregate Functions Detected:** Aggregate functions (e.g., COUNT, SUM) were identified.");
-            }
-            analysis.AppendLine();
-
-            // Detect DISTINCT
-            if (Regex.IsMatch(selectBlock, @"\bSELECT\s+DISTINCT\b", RegexOptions.IgnoreCase))
-            {
-                analysis.AppendLine("**Distinct Usage:** The DISTINCT keyword is used to eliminate duplicate rows.");
-            }
-            analysis.AppendLine();
-
-            // Detect subqueries (simple check)
-            if (Regex.IsMatch(selectBlock, @"\(\s*SELECT", RegexOptions.IgnoreCase))
-            {
-                analysis.AppendLine("**Subqueries Detected:** The query contains one or more subqueries.");
-            }
-            analysis.AppendLine();
-
-            return analysis.ToString();
-        }
-
-        /// <summary>
-        /// Provides analysis for non-SELECT queries (INSERT, UPDATE, DELETE, or procedure bodies).
-        /// </summary>
-        private string AnalyzeNonSelect(string sql)
-        {
-            StringBuilder analysis = new StringBuilder();
-            string upperSql = sql.ToUpper();
-            if (upperSql.Contains("INSERT"))
-            {
-                analysis.AppendLine("- **INSERT Statement Detected:** This query inserts data into one or more tables.");
-            }
-            if (upperSql.Contains("UPDATE"))
-            {
-                analysis.AppendLine("- **UPDATE Statement Detected:** This query updates existing data.");
-            }
-            if (upperSql.Contains("DELETE"))
-            {
-                analysis.AppendLine("- **DELETE Statement Detected:** This query deletes data from a table.");
-            }
-            if (upperSql.Contains("CREATE PROCEDURE") || upperSql.Contains("ALTER PROCEDURE") || upperSql.Contains("CREATE PROC"))
-            {
-                analysis.AppendLine("- **Stored Procedure Detected:** This is a stored procedure containing procedural logic and one or more DML statements.");
-            }
-            return analysis.ToString();
-        }
-
-        /// <summary>
-        /// Analyzes the SQL for procedural constructs such as loops, cursors, and conditional statements.
-        /// </summary>
-        private string AnalyzeProceduralElements(string sql)
-        {
-            StringBuilder procAnalysis = new StringBuilder();
-
-            // Check for loops
-            if (Regex.IsMatch(sql, @"\bFOR\s+.+\bLOOP\b", RegexOptions.IgnoreCase) ||
-                Regex.IsMatch(sql, @"\bWHILE\b", RegexOptions.IgnoreCase))
-            {
-                procAnalysis.AppendLine("- **Loop Constructs Detected:** There are FOR or WHILE loops present.");
-            }
-            // Check for cursors
-            if (Regex.IsMatch(sql, @"\bCURSOR\b", RegexOptions.IgnoreCase))
-            {
-                procAnalysis.AppendLine("- **Cursor Declaration Detected:** The SQL uses a cursor for row-by-row processing.");
-            }
-            // Check for CASE statements
-            if (Regex.IsMatch(sql, @"\bCASE\b", RegexOptions.IgnoreCase))
-            {
-                procAnalysis.AppendLine("- **CASE Statements Detected:** The query includes CASE expressions.");
-            }
-            // Check for IF statements
-            if (Regex.IsMatch(sql, @"\bIF\s+.+\bTHEN\b", RegexOptions.IgnoreCase))
-            {
-                procAnalysis.AppendLine("- **Conditional (IF) Statements Detected:** The procedure contains conditional logic.");
-            }
-
-            return procAnalysis.ToString();
-        }
-
-        /// <summary>
-        /// Generates a summary of key components detected in the SQL.
-        /// </summary>
-        private string GenerateComponentSummary(string sql)
-        {
-            StringBuilder summary = new StringBuilder();
-            summary.AppendLine("- **SQL Type:** " + IdentifySqlType(sql));
-            summary.AppendLine("- **CTEs:** " + (Regex.IsMatch(sql, @"WITH\s+", RegexOptions.IgnoreCase) ? "Detected" : "Not Detected"));
-            summary.AppendLine("- **SELECT / DML Statements:** " + (Regex.IsMatch(sql, @"\b(SELECT|INSERT|UPDATE|DELETE)\b", RegexOptions.IgnoreCase) ? "Detected" : "Not Detected"));
-            summary.AppendLine("- **Joins:** " + (Regex.IsMatch(sql, @"\bJOIN\b", RegexOptions.IgnoreCase) ? "Detected" : "Not Detected"));
-            summary.AppendLine("- **Aggregates:** " + (Regex.IsMatch(sql, @"\b(AVG|COUNT|SUM|MIN|MAX)\s*\(", RegexOptions.IgnoreCase) ? "Detected" : "Not Detected"));
-            summary.AppendLine("- **Grouping:** " + (Regex.IsMatch(sql, @"\bGROUP\s+BY\b", RegexOptions.IgnoreCase) ? "Detected" : "Not Detected"));
-            summary.AppendLine("- **Procedural Constructs:** " + ((Regex.IsMatch(sql, @"\bFOR\b", RegexOptions.IgnoreCase) ||
-                                                                Regex.IsMatch(sql, @"\bWHILE\b", RegexOptions.IgnoreCase) ||
-                                                                Regex.IsMatch(sql, @"\bCURSOR\b", RegexOptions.IgnoreCase) ||
-                                                                Regex.IsMatch(sql, @"\bCASE\b", RegexOptions.IgnoreCase))
-                                                                    ? "Detected" : "Not Detected"));
-            return summary.ToString();
         }
     }
 }
