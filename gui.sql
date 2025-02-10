@@ -49,3 +49,45 @@ SELECT
   NTILE(3) OVER (ORDER BY DaysCount) AS DaysTertile
 FROM
   StatisticsTable;
+
+
+WITH ReportStats AS (
+  SELECT 
+    Client,  -- Include Client in the analysis
+    ReportName,
+    TotalAccountCount,
+    DaysCount,
+    TotalRunTime,
+    -- Runtime per account-day (handle division by zero)
+    TotalRunTime / NULLIF(TotalAccountCount * DaysCount, 0) AS RuntimePerAccountDay,
+    -- Z-score within parameter buckets
+    (TotalRunTime - AVG(TotalRunTime) OVER (PARTITION BY AccountBucket, DaysBucket)) 
+    / NULLIF(STDEV(TotalRunTime) OVER (PARTITION BY AccountBucket, DaysBucket), 0) AS ZScore
+  FROM 
+    StatisticsTable
+  CROSS APPLY (
+    SELECT 
+      CASE 
+        WHEN TotalAccountCount <= 100 THEN '0-100'
+        WHEN TotalAccountCount <= 500 THEN '101-500'
+        ELSE '500+' 
+      END AS AccountBucket,
+      CASE 
+        WHEN DaysCount <= 7 THEN '1-7'
+        WHEN DaysCount <= 30 THEN '8-30'
+        ELSE '30+' 
+      END AS DaysBucket
+  ) AS Buckets
+)
+SELECT 
+  Client,
+  ReportName,
+  AVG(RuntimePerAccountDay) AS AvgEfficiency,
+  COUNT(*) AS TotalRuns,
+  MAX(ZScore) AS MaxZScore
+FROM 
+  ReportStats
+GROUP BY 
+  Client, ReportName  -- Group by both Client and ReportName
+ORDER BY 
+  AvgEfficiency DESC;  -- Prioritize the most inefficient client-report combinations
