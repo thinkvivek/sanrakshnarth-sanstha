@@ -36,3 +36,16 @@ GROUP BY
   ReportName
 ORDER BY 
   AvgEfficiency DESC;
+
+
+SELECT
+  ReportName,
+  TotalAccountCount,
+  DaysCount,
+  TotalRunTime,
+  -- Account Buckets (4 groups)
+  NTILE(4) OVER (ORDER BY TotalAccountCount) AS AccountQuartile,
+  -- Days Buckets (3 groups)
+  NTILE(3) OVER (ORDER BY DaysCount) AS DaysTertile
+FROM
+  StatisticsTable;
