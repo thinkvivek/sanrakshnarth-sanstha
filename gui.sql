@@ -41,3 +41,45 @@ SELECT
 FROM ranked_reports
 WHERE report_rank <= 10
 ORDER BY ClientID, report_rank;
+
+
+
+WITH report_stats_normalized AS (
+    SELECT
+        ReportName,
+        TotalRunningTime / (AccountCount * DaysCount) AS normalized_time,
+        TotalRunningTime,
+        AccountCount,
+        DaysCount,
+        RunDate
+    FROM report_stats
+    WHERE AccountCount > 0 AND DaysCount > 0
+),
+aggregated AS (
+    SELECT
+        ReportName,
+        MEDIAN(normalized_time) AS median_normalized_time,
+        MAX(normalized_time) AS max_normalized_time,
+        COUNT(*) AS run_count
+    FROM report_stats_normalized
+    GROUP BY ReportName
+),
+ranked_reports AS (
+    SELECT
+        aggregated.*,
+        ROW_NUMBER() OVER (
+            ORDER BY median_normalized_time DESC
+        ) AS report_rank
+    FROM aggregated
+    WHERE run_count >= 3  -- Consistency threshold (adjust as needed)
+)
+SELECT
+    ReportName,
+    median_normalized_time,
+    max_normalized_time,
+    run_count,
+    ROUND((max_normalized_time - median_normalized_time) / median_normalized_time * 100, 2) 
+        AS outlier_percent_diff
+FROM ranked_reports
+WHERE report_rank <= 25
+ORDER BY report_rank;
