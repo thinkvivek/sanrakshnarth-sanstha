@@ -1,39 +1,23 @@
-import ibm_db
+from cryptography.hazmat.primitives.serialization import pkcs12
+from cryptography.hazmat.primitives.serialization import Encoding
+import sys
 
-# DB2 Connection Details
-db_host = "your_db_host"  # e.g., "db2.example.com"
-db_port = "50001"         # SSL port
-db_name = "your_db_name"
-db_user = "your_username"
-db_password = "your_password"
+# Define input and output file names
+pfx_file = "certificate.pfx"  # Input .pfx file
+crt_file = "certificate.crt"  # Output .crt file
+pfx_password = b"your_password_here"  # Replace with your .pfx password
 
-# Path to SSL Certificate KDB file
-ssl_kdb_path = "/path/to/certificate.kdb"
+# Read the .pfx file
+with open(pfx_file, "rb") as f:
+    pfx_data = f.read()
 
-# Connection String with SSL
-conn_str = f"DATABASE={db_name}; HOSTNAME={db_host}; PORT={db_port}; PROTOCOL=TCPIP; UID={db_user}; PWD={db_password}; Security=SSL; SSLServerCertificate={ssl_kdb_path};"
+# Load the .pfx contents
+private_key, certificate, additional_certs = pkcs12.load_key_and_certificates(pfx_data, pfx_password)
 
-# Establish Connection
-try:
-    conn = ibm_db.connect(conn_str, "", "")
-    print("Connected to DB2 successfully!")
-
-    # Read Query from x.sql
-    with open("x.sql", "r") as sql_file:
-        sql_query = sql_file.read()
-
-    # Execute Query
-    stmt = ibm_db.exec_immediate(conn, sql_query)
-    
-    # Fetch and Print Results
-    result = ibm_db.fetch_assoc(stmt)
-    while result:
-        print(result)  # Print each row
-        result = ibm_db.fetch_assoc(stmt)
-
-    # Close Connection
-    ibm_db.close(conn)
-    print("Connection closed.")
-
-except Exception as e:
-    print(f"Error connecting to DB2: {str(e)}")
+# Write the extracted certificate to a .crt file
+if certificate:
+    with open(crt_file, "wb") as f:
+        f.write(certificate.public_bytes(Encoding.PEM))
+    print(f"Successfully extracted: {crt_file}")
+else:
+    print("No certificate found in the PFX file.", file=sys.stderr)
