@@ -21,3 +21,27 @@ if certificate:
     print(f"Successfully extracted: {crt_file}")
 else:
     print("No certificate found in the PFX file.", file=sys.stderr)
+
+
+
+
+import ibm_db
+
+dsn = (
+    "DATABASE=YOUR_DB;"
+    "HOSTNAME=your.db2.server;"
+    "PORT=50001;"
+    "PROTOCOL=TCPIP;"
+    "UID=your_user;"
+    "PWD=your_password;"
+    "SECURITY=SSL;"
+    "SSLCLIENTKEYSTOREDB=/path/to/your_keystore.kdb;"
+    "SSLCLIENTKEYSTASH=/path/to/your_keystore.sth;"
+)
+
+try:
+    conn = ibm_db.connect(dsn, "", "")
+    print("Connected successfully!")
+except Exception as e:
+    print(f"Connection failed: {e}")
+
