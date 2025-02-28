@@ -34,3 +34,15 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+@echo off
+REM Get current date and time in a consistent format
+set "datetime=%date% %time%"
+
+REM Append the datetime to a text file (>> appends instead of overwriting)
+echo %datetime% >> "C:\path\to\your_file.txt"
+
+REM Optional: Display a message to confirm it ran
+echo Appended date and time to your_file.txt
