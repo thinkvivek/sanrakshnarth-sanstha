@@ -1,0 +1,107 @@
+import xml.etree.ElementTree as ET
+import json
+
+def parse_control_m_xml(xml_file):
+    """
+    Parse Control-M XML and extract specified JOB properties and dependencies.
+    Returns a list of job dictionaries with details and dependencies.
+    """
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    
+    jobs = []
+    
+    # Iterate through all JOB nodes under FOLDERs within DEFTABLE
+    for folder in root.findall('.//FOLDER'):
+        for job in folder.findall('JOB'):
+            # Extract specified JOB attributes
+            job_attrs = dict(job.attrib)
+            job_name = job_attrs.get('JOBNAME')
+            if not job_name:
+                continue
+            
+            # Filter to only include requested properties
+            job_details = {
+                'JOBNAME': job_attrs.get('JOBNAME'),
+                'DESCRIPTION': job_attrs.get('DESCRIPTION'),
+                'NODEID': job_attrs.get('NODEID'),
+                'CMDLINE': job_attrs.get('CMDLINE'),
+                'WEEKSCAL': job_attrs.get('WEEKSCAL')
+            }
+            
+            # Parse OUTCOND
+            outconds = job.findall('OUTCOND')
+            if outconds:
+                job_details['OUTCOND'] = [
+                    {
+                        'NAME': outcond.get('NAME'),
+                        'ODATE': outcond.get('ODATE'),
+                        'SIGN': outcond.get('SIGN')
+                    } for outcond in outconds
+                ]
+            
+            # Parse INCOND
+            inconds = job.findall('INCOND')
+            if inconds:
+                job_details['INCOND'] = [
+                    {
+                        'NAME': incond.get('NAME'),
+                        'ODATE': incond.get('ODATE'),
+                        'AND_OR': incond.get('AND_OR')
+                    } for incond in inconds
+                ]
+            
+            # Extract dependencies from INCOND NAME (assuming format like "JobX-DONE")
+            dependencies = []
+            if 'INCOND' in job_details:
+                for incond in job_details['INCOND']:
+                    cond_name = incond.get('NAME', '')
+                    if '-DONE' in cond_name:  # Adjust if your condition naming differs
+                        dep_job = cond_name.replace('-DONE', '')
+                        dependencies.append(dep_job)
+            
+            jobs.append({
+                "name": job_name,
+                "details": job_details,
+                "depends_on": dependencies
+            })
+    
+    return jobs
+
+def create_graph_json(jobs):
+    """
+    Transform job data into a graph JSON format with nodes and edges.
+    """
+    nodes = [
+        {
+            "id": job["name"],
+            "label": job["name"],
+            **job["details"]
+        }
+        for job in jobs
+    ]
+    
+    edges = []
+    for job in jobs:
+        for dep in job["depends_on"]:
+            edges.append({"from": dep, "to": job["name"]})
+    
+    return {"nodes": nodes, "edges": edges}
+
+def main():
+    xml_file = "control_m_jobs.xml"  # Replace with your XML file path
+    jobs = parse_control_m_xml(xml_file)
+    if not jobs:
+        print("No jobs found in the XML file.")
+        return
+    
+    graph_data = create_graph_json(jobs)
+    output_json = "job_dependencies.json"
+    with open(output_json, "w") as f:
+        json.dump(graph_data, f, indent=2)
+    
+    print(f"JSON file created: {output_json}")
+    print(f"Processed {len(jobs)} jobs with {len(graph_data['edges'])} dependencies.")
+
+if __name__ == "__main__":
+    main()
