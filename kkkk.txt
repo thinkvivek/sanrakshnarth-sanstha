@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>Control-M Job Dependency Graph</title>
-  <!-- Load Cytoscape.js from CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.19.0/cytoscape.min.js"></script>
   <style>
     #cy {
@@ -31,105 +30,111 @@
   <div id="details">Click a job to see details here...</div>
 
   <script>
-    fetch('job_dependencies.json')
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Fetch failed: ${response.status} - ${response.statusText}`);
-        }
-        return response.json();
-      })
-      .then(data => {
-        console.log('JSON Data Loaded:', data);
+    // Embed your job_dependencies.json content here
+    const data = /* PASTE YOUR job_dependencies.json CONTENT HERE */ {
+      "nodes": [
+        {"id": "Job1", "JOBNAME": "Job1", "DESCRIPTION": "Start process", "NODEID": "Server1", "CMDLINE": "start.sh", "WEEKSCAL": "MON"},
+        {"id": "Job2", "JOBNAME": "Job2", "DESCRIPTION": "Process data", "NODEID": "Server2", "CMDLINE": "process.py", "WEEKSCAL": "MON", "INCOND": [{"NAME": "Job1-DONE", "ODATE": "ODAT", "AND_OR": "AND"}]},
+        {"id": "Job3", "JOBNAME": "Job3", "DESCRIPTION": "End process", "NODEID": "Server1", "CMDLINE": "end.sh", "WEEKSCAL": "MON", "INCOND": [{"NAME": "Job2-DONE", "ODATE": "ODAT", "AND_OR": "AND"}]}
+      ],
+      "edges": [
+        {"from": "Job1", "to": "Job2"},
+        {"from": "Job2", "to": "Job3"}
+      ]
+    };
 
-        if (!data.nodes || !data.edges) {
-          throw new Error('JSON is missing nodes or edges');
-        }
+    try {
+      // Validate data
+      if (!data.nodes || !Array.isArray(data.nodes) || data.nodes.length === 0) {
+        throw new Error('No valid nodes found in JSON');
+      }
+      if (!data.edges || !Array.isArray(data.edges)) {
+        throw new Error('No valid edges found in JSON');
+      }
 
-        // Prepare Cytoscape elements
-        const elements = [
-          ...data.nodes.map(node => ({
-            group: 'nodes',
-            data: {
-              id: node.id,
-              label: node.JOBNAME || 'Unnamed',
-              fullDetails: node
-            }
-          })),
-          ...data.edges.map(edge => ({
-            group: 'edges',
-            data: {
-              source: edge.from,
-              target: edge.to
-            }
-          }))
-        ];
-
-        // Initialize Cytoscape
-        const cy = cytoscape({
-          container: document.getElementById('cy'),
-          elements: elements,
-          style: [
-            {
-              selector: 'node',
-              style: {
-                'background-color': '#666',
-                'label': 'data(label)',
-                'width': 50,
-                'height': 50,
-                'text-valign': 'center',
-                'color': '#fff',
-                'font-size': '14px',
-                'text-outline-width': 2,
-                'text-outline-color': '#666'
-              }
-            },
-            {
-              selector: 'edge',
-              style: {
-                'width': 3,
-                'line-color': '#ccc',
-                'target-arrow-color': '#ccc',
-                'target-arrow-shape': 'triangle',
-                'curve-style': 'bezier'
-              }
-            }
-          ],
-          layout: {
-            name: 'dagre', // Directed acyclic graph layout
-            rankDir: 'TB', // Top to bottom
-            nodeSep: 50,
-            rankSep: 100
+      // Prepare Cytoscape elements
+      const elements = [
+        ...data.nodes.map(node => ({
+          group: 'nodes',
+          data: {
+            id: node.id,
+            label: node.JOBNAME || 'Unnamed',
+            fullDetails: node
           }
-        });
-
-        // Click event for details
-        cy.on('tap', 'node', function(evt) {
-          const node = evt.target;
-          const details = node.data('fullDetails');
-          const detailsDiv = document.getElementById('details');
-          detailsDiv.innerHTML = `
-            <h3>${details.JOBNAME || 'Unnamed'}</h3>
-            <p><strong>Description:</strong> ${details.DESCRIPTION || 'N/A'}</p>
-            <p><strong>Node ID:</strong> ${details.NODEID || 'N/A'}</p>
-            <p><strong>Command Line:</strong> ${details.CMDLINE || 'N/A'}</p>
-            <p><strong>Weeks Calendar:</strong> ${details.WEEKSCAL || 'N/A'}</p>
-            <p><strong>In Conditions:</strong> ${details.INCOND ? JSON.stringify(details.INCOND, null, 2) : 'None'}</p>
-            <p><strong>Out Conditions:</strong> ${details.OUTCOND ? JSON.stringify(details.OUTCOND, null, 2) : 'None'}</p>
-          `;
-        });
-
-        cy.on('tap', function(evt) {
-          if (evt.target === cy) {
-            document.getElementById('details').innerHTML = 'Click a job to see details here...';
+        })),
+        ...data.edges.map(edge => ({
+          group: 'edges',
+          data: {
+            source: edge.from,
+            target: edge.to
           }
-        });
+        }))
+      ];
 
-        console.log('Graph rendered successfully with Cytoscape.js');
-      })
-      .catch(error => {
-        console.error('Error:', error);
-        document.getElementById('details').innerHTML = `Error: ${error.message}<br>Check console for details.`;
+      // Initialize Cytoscape
+      const cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: elements,
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': '#666',
+              'label': 'data(label)',
+              'width': 50,
+              'height': 50,
+              'text-valign': 'center',
+              'color': '#fff',
+              'font-size': '14px',
+              'text-outline-width': 2,
+              'text-outline-color': '#666'
+            }
+          },
+          {
+            selector: 'edge',
+            style: {
+              'width': 3,
+              'line-color': '#ccc',
+              'target-arrow-color': '#ccc',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'bezier'
+            }
+          }
+        ],
+        layout: {
+          name: 'dagre',
+          rankDir: 'TB',
+          nodeSep: 50,
+          rankSep: 100
+        }
       });
+
+      // Click event for details
+      cy.on('tap', 'node', function(evt) {
+        const node = evt.target;
+        const details = node.data('fullDetails');
+        document.getElementById('details').innerHTML = `
+          <h3>${details.JOBNAME || 'Unnamed'}</h3>
+          <p><strong>Description:</strong> ${details.DESCRIPTION || 'N/A'}</p>
+          <p><strong>Node ID:</strong> ${details.NODEID || 'N/A'}</p>
+          <p><strong>Command Line:</strong> ${details.CMDLINE || 'N/A'}</p>
+          <p><strong>Weeks Calendar:</strong> ${details.WEEKSCAL || 'N/A'}</p>
+          <p><strong>In Conditions:</strong> ${details.INCOND ? JSON.stringify(details.INCOND, null, 2) : 'None'}</p>
+          <p><strong>Out Conditions:</strong> ${details.OUTCOND ? JSON.stringify(details.OUTCOND, null, 2) : 'None'}</p>
+        `;
+      });
+
+      cy.on('tap', function(evt) {
+        if (evt.target === cy) {
+          document.getElementById('details').innerHTML = 'Click a job to see details here...';
+        }
+      });
+
+      console.log('Graph rendered successfully with Cytoscape.js');
+    } catch (error) {
+      console.error('Error:', error);
+      document.getElementById('details').innerHTML = `Error: ${error.message}<br>Check console for details.`;
+    }
   </script>
 </body>
 </html>
