@@ -30,35 +30,68 @@
   <div id="details">Click a job to see details here...</div>
 
   <script>
-    // Hardcoded minimal JSON for testing
-    const testData = {
-      nodes: [
-        { id: "Job1", label: "Job1" },
-        { id: "Job2", label: "Job2" }
-      ],
-      edges: [
-        { from: "Job1", to: "Job2" }
-      ]
-    };
+    fetch('job_dependencies.json')
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch JSON: ${response.status} - ${response.statusText}`);
+        }
+        return response.text(); // Get raw text first to debug
+      })
+      .then(text => {
+        console.log('Raw JSON text:', text); // Log raw content
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          throw new Error(`JSON Parse Error: ${e.message}`);
+        }
+        console.log('Parsed JSON:', data);
 
-    try {
-      const nodes = new vis.DataSet(testData.nodes);
-      const edges = new vis.DataSet(testData.edges);
-      const container = document.getElementById('network');
-      const graphData = { nodes: nodes, edges: edges };
-      const options = {
-        nodes: { shape: 'dot', size: 15, font: { size: 12 }, borderWidth: 2 },
-        edges: { arrows: 'to', smooth: { type: 'curvedCW' } },
-        layout: { hierarchical: { direction: 'UD', sortMethod: 'directed' } },
-        physics: false
-      };
+        if (!data.nodes || !Array.isArray(data.nodes) || data.nodes.length === 0) {
+          throw new Error('No valid nodes found in JSON');
+        }
+        if (!data.edges || !Array.isArray(data.edges)) {
+          throw new Error('No valid edges found in JSON');
+        }
 
-      const network = new vis.Network(container, graphData, options);
-      console.log('Graph rendered successfully with test data');
-    } catch (error) {
-      console.error('Error with test data:', error);
-      document.getElementById('details').innerHTML = `Test Error: ${error.message}`;
-    }
+        const nodes = new vis.DataSet(data.nodes.map(node => ({
+          id: node.id,
+          label: node.JOBNAME || 'Unnamed',
+          title: `Job: ${node.JOBNAME || 'N/A'}\nDesc: ${node.DESCRIPTION || 'N/A'}\nNode: ${node.NODEID || 'N/A'}`,
+          fullDetails: node
+        })));
+        const edges = new vis.DataSet(data.edges);
+
+        const container = document.getElementById('network');
+        const graphData = { nodes: nodes, edges: edges };
+        const options = {
+          nodes: {
+            shape: 'dot',
+            size: 15,
+            font: { size: 12 },
+            borderWidth: 2
+          },
+          edges: {
+            arrows: 'to',
+            smooth: { type: 'curvedCW' }
+          },
+          layout: {
+            hierarchical: {
+              direction: 'UD',
+              sortMethod: 'directed'
+            }
+          },
+          physics: false,
+          interaction: { hover: true, tooltipDelay: 200 }
+        };
+
+        const network = new vis.Network(container, graphData, options);
+        console.log('Graph rendered successfully');
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('details').innerHTML = `Error: ${error.message}<br>Check console for details.`;
+      });
   </script>
 </body>
 </html>
