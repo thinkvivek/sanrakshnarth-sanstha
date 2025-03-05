@@ -1,140 +1,79 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Control-M Job Dependency Graph</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.19.0/cytoscape.min.js"></script>
-  <style>
-    #cy {
-      width: 100%;
-      height: 600px;
-      border: 1px solid lightgray;
+import xml.etree.ElementTree as ET
+import json
+
+def parse_sub_elements(element):
+    """
+    Recursively parse an XML element and its sub-elements into a dictionary.
+    Captures attributes, text content, and nested elements.
+    """
+    result = {}
+    
+    # Capture all attributes
+    if element.attrib:
+        result.update(element.attrib)
+    
+    # Capture text content if present
+    if element.text and element.text.strip():
+        result['text'] = element.text.strip()
+    
+    # Parse sub-elements
+    children = {}
+    for child in element:
+        child_data = parse_sub_elements(child)
+        if child.tag in children:
+            # Handle multiple instances (e.g., multiple SHOUT or ON nodes)
+            if not isinstance(children[child.tag], list):
+                children[child.tag] = [children[child.tag]]
+            children[child.tag].append(child_data)
+        else:
+            children[child.tag] = child_data
+    
+    if children:
+        result.update(children)
+    
+    return result
+
+def xml_to_json(xml_file):
+    """
+    Convert Control-M XML to JSON, extracting all JOB properties and specified sub-nodes.
+    """
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    
+    # Initialize result structure
+    result = {
+        "DEFTABLE": []
     }
-    #details {
-      width: 100%;
-      height: 200px;
-      overflow-y: auto;
-      border: 1px solid lightgray;
-      padding: 10px;
-      font-family: Arial, sans-serif;
-    }
-    body {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-  </style>
-</head>
-<body>
-  <div id="cy"></div>
-  <div id="details">Click a job to see details here...</div>
-
-  <script>
-    // Embed your job_dependencies.json content here
-    const data = /* PASTE YOUR job_dependencies.json CONTENT HERE */ {
-      "nodes": [
-        {"id": "Job1", "JOBNAME": "Job1", "DESCRIPTION": "Start process", "NODEID": "Server1", "CMDLINE": "start.sh", "WEEKSCAL": "MON"},
-        {"id": "Job2", "JOBNAME": "Job2", "DESCRIPTION": "Process data", "NODEID": "Server2", "CMDLINE": "process.py", "WEEKSCAL": "MON", "INCOND": [{"NAME": "Job1-DONE", "ODATE": "ODAT", "AND_OR": "AND"}]},
-        {"id": "Job3", "JOBNAME": "Job3", "DESCRIPTION": "End process", "NODEID": "Server1", "CMDLINE": "end.sh", "WEEKSCAL": "MON", "INCOND": [{"NAME": "Job2-DONE", "ODATE": "ODAT", "AND_OR": "AND"}]}
-      ],
-      "edges": [
-        {"from": "Job1", "to": "Job2"},
-        {"from": "Job2", "to": "Job3"}
-      ]
-    };
-
-    try {
-      // Validate data
-      if (!data.nodes || !Array.isArray(data.nodes) || data.nodes.length === 0) {
-        throw new Error('No valid nodes found in JSON');
-      }
-      if (!data.edges || !Array.isArray(data.edges)) {
-        throw new Error('No valid edges found in JSON');
-      }
-
-      // Prepare Cytoscape elements
-      const elements = [
-        ...data.nodes.map(node => ({
-          group: 'nodes',
-          data: {
-            id: node.id,
-            label: node.JOBNAME || 'Unnamed',
-            fullDetails: node
-          }
-        })),
-        ...data.edges.map(edge => ({
-          group: 'edges',
-          data: {
-            source: edge.from,
-            target: edge.to
-          }
-        }))
-      ];
-
-      // Initialize Cytoscape
-      const cy = cytoscape({
-        container: document.getElementById('cy'),
-        elements: elements,
-        style: [
-          {
-            selector: 'node',
-            style: {
-              'background-color': '#666',
-              'label': 'data(label)',
-              'width': 50,
-              'height': 50,
-              'text-valign': 'center',
-              'color': '#fff',
-              'font-size': '14px',
-              'text-outline-width': 2,
-              'text-outline-color': '#666'
-            }
-          },
-          {
-            selector: 'edge',
-            style: {
-              'width': 3,
-              'line-color': '#ccc',
-              'target-arrow-color': '#ccc',
-              'target-arrow-shape': 'triangle',
-              'curve-style': 'bezier'
-            }
-          }
-        ],
-        layout: {
-          name: 'dagre',
-          rankDir: 'TB',
-          nodeSep: 50,
-          rankSep: 100
+    
+    # Process each FOLDER under DEFTABLE
+    for folder in root.findall('.//FOLDER'):
+        folder_data = {
+            "FOLDERNAME": folder.get('FOLDERNAME', 'Unnamed'),
+            "JOBS": []
         }
-      });
+        
+        # Process each JOB under FOLDER
+        for job in folder.findall('JOB'):
+            job_data = parse_sub_elements(job)
+            folder_data["JOBS"].append(job_data)
+        
+        result["DEFTABLE"].append(folder_data)
+    
+    return result
 
-      // Click event for details
-      cy.on('tap', 'node', function(evt) {
-        const node = evt.target;
-        const details = node.data('fullDetails');
-        document.getElementById('details').innerHTML = `
-          <h3>${details.JOBNAME || 'Unnamed'}</h3>
-          <p><strong>Description:</strong> ${details.DESCRIPTION || 'N/A'}</p>
-          <p><strong>Node ID:</strong> ${details.NODEID || 'N/A'}</p>
-          <p><strong>Command Line:</strong> ${details.CMDLINE || 'N/A'}</p>
-          <p><strong>Weeks Calendar:</strong> ${details.WEEKSCAL || 'N/A'}</p>
-          <p><strong>In Conditions:</strong> ${details.INCOND ? JSON.stringify(details.INCOND, null, 2) : 'None'}</p>
-          <p><strong>Out Conditions:</strong> ${details.OUTCOND ? JSON.stringify(details.OUTCOND, null, 2) : 'None'}</p>
-        `;
-      });
+def main():
+    xml_file = "control_m_jobs.xml"  # Replace with your XML file path
+    output_json = "C:/kkk/job_dependencies.json"  # Output path in C:\kkk
+    
+    # Convert XML to JSON
+    json_data = xml_to_json(xml_file)
+    
+    # Write to JSON file
+    with open(output_json, 'w') as f:
+        json.dump(json_data, f, indent=2)
+    
+    print(f"JSON file created at: {output_json}")
+    print(f"Processed {sum(len(folder['JOBS']) for folder in json_data['DEFTABLE'])} jobs")
 
-      cy.on('tap', function(evt) {
-        if (evt.target === cy) {
-          document.getElementById('details').innerHTML = 'Click a job to see details here...';
-        }
-      });
-
-      console.log('Graph rendered successfully with Cytoscape.js');
-    } catch (error) {
-      console.error('Error:', error);
-      document.getElementById('details').innerHTML = `Error: ${error.message}<br>Check console for details.`;
-    }
-  </script>
-</body>
-</html>
+if __name__ == "__main__":
+    main()
