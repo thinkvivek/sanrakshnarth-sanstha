@@ -1,28 +1,37 @@
 import cx_Oracle
 import configparser
 import sys
-import pandas as pd
 from pathlib import Path
 
 def read_config(config_file):
-    """Read Oracle connection details from a config file."""
+    """Read SQL and text file paths from a config file."""
     config = configparser.ConfigParser()
     config.read(config_file)
     
     try:
-        username = config['ORACLE']['username']
-        password = config['ORACLE']['password']
-        dsn = config['ORACLE']['dsn']
-        return username, password, dsn
+        sql_path = config['PATHS']['sql_path']
+        txt_path = config['PATHS']['csv_path']  # Reusing 'csv_path' as txt_path
+        return sql_path, txt_path
     except KeyError as e:
         print(f"Error: Missing key {e} in {config_file}")
         sys.exit(1)
 
-def connect_and_execute(sql_file, output_to_csv=False):
-    """Connect to Oracle DB and execute the SQL script using cx_Oracle."""
-    # Read config
+def connect_and_execute(sql_file_name, is_txt=False):
+    """Connect to Oracle DB and execute the SQL script."""
+    # Read paths from config
     config_file = "ora.config"
-    username, password, dsn = read_config(config_file)
+    sql_path, txt_path = read_config(config_file)
+    
+    # Construct full SQL file path
+    sql_file_path = Path(sql_path) / sql_file_name
+    if not sql_file_path.exists():
+        print(f"Error: SQL file '{sql_file_path}' not found.")
+        sys.exit(1)
+    
+    # Database credentials (hardcoded for simplicity; consider env vars in production)
+    username = "your_username"
+    password = "your_password"
+    dsn = "your_dsn"  # e.g., "localhost:1521/orcl"
     
     try:
         # Establish connection
@@ -33,16 +42,12 @@ def connect_and_execute(sql_file, output_to_csv=False):
         )
         print("Connected to Oracle database successfully.")
         
-        # Create a cursor
-        cursor = connection.cursor()
-        
         # Read SQL script
-        sql_file_path = Path(sql_file)
-        if not sql_file_path.exists():
-            raise FileNotFoundError(f"SQL file '{sql_file}' not found.")
-        
         with open(sql_file_path, 'r') as file:
             sql_script = file.read()
+        
+        # Create a cursor
+        cursor = connection.cursor()
         
         # Execute SQL script
         cursor.execute(sql_script)
@@ -53,12 +58,20 @@ def connect_and_execute(sql_file, output_to_csv=False):
             rows = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
             
-            if output_to_csv:
-                # Save to CSV using pandas
-                df = pd.DataFrame(rows, columns=columns)
-                csv_file = sql_file_path.stem + "_output.csv"
-                df.to_csv(csv_file, index=False)
-                print(f"Output saved to {csv_file}")
+            if is_txt:
+                # Save to text file with ~ delimiter
+                txt_file_path = Path(txt_path) / f"{sql_file_name.split('.')[0]}_output.txt"
+                txt_file_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
+                
+                with open(txt_file_path, 'w') as f:
+                    # Write header
+                    f.write('~'.join(columns) + '\n')
+                    # Write rows
+                    for row in rows:
+                        # Convert each value to string, handle None
+                        row_str = '~'.join(str(val) if val is not None else '' for val in row)
+                        f.write(row_str + '\n')
+                print(f"Output saved to {txt_file_path}")
             else:
                 # Check if result is True (assuming a single row with a boolean-like value)
                 if rows and len(rows) == 1 and len(rows[0]) == 1:
@@ -70,7 +83,7 @@ def connect_and_execute(sql_file, output_to_csv=False):
         else:
             # For non-SELECT statements, commit the transaction
             connection.commit()
-            print(f"SQL script '{sql_file}' executed successfully (no output).")
+            print(f"SQL script '{sql_file_path}' executed successfully (no output).")
         
     except cx_Oracle.Error as error:
         print(f"Error connecting to Oracle or executing SQL: {error}")
@@ -87,13 +100,13 @@ def connect_and_execute(sql_file, output_to_csv=False):
 if __name__ == "__main__":
     # Check command-line arguments
     if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python run_oracle_sql_cx.py <sql_file> [output_to_csv]")
-        print("  <sql_file>: Path to the SQL file to execute")
-        print("  [output_to_csv]: 'csv' to save output to CSV, omit to check True/False")
+        print("Usage: python run_oracle_sql_with_txt.py <sql_file_name> [is_txt]")
+        print("  <sql_file_name>: Name of the SQL file (e.g., query.sql)")
+        print("  [is_txt]: 'txt' to save output to text file with ~ delimiter, omit to check True/False")
         sys.exit(1)
     
-    sql_file = sys.argv[1]
-    output_to_csv = len(sys.argv) == 3 and sys.argv[2].lower() == "csv"
+    sql_file_name = sys.argv[1]
+    is_txt = len(sys.argv) == 3 and sys.argv[2].lower() == "txt"
     
     # Execute the script
-    connect_and_execute(sql_file, output_to_csv)
+    connect_and_execute(sql_file_name, is_txt)
