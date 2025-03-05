@@ -95,4 +95,20 @@ def connect_and_execute(sql_file_name, is_txt=False):
         # Clean up
         if 'cursor' in locals():
             cursor.close()
-        if 'connection' in locals
+        if 'connection' in locals() and connection:
+            connection.close()
+            print("Database connection closed.")
+
+if __name__ == "__main__":
+    # Check command-line arguments
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
+        print("Usage: python run_oracle_sql_full_config.py <sql_file_name> [is_txt]")
+        print("  <sql_file_name>: Name of the SQL file (e.g., query.sql)")
+        print("  [is_txt]: 'txt' to save output to text file with ~ delimiter, omit to check True/False")
+        sys.exit(1)
+    
+    sql_file_name = sys.argv[1]
+    is_txt = len(sys.argv) == 3 and sys.argv[2].lower() == "txt"
+    
+    # Execute the script
+    connect_and_execute(sql_file_name, is_txt)
