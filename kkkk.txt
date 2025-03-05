@@ -30,63 +30,35 @@
   <div id="details">Click a job to see details here...</div>
 
   <script>
-    fetch('job_dependencies.json')
-      .then(response => response.json())
-      .then(data => {
-        const nodes = new vis.DataSet(data.nodes.map(node => ({
-          id: node.id,
-          label: node.JOBNAME,
-          title: `Job: ${node.JOBNAME}\nDesc: ${node.DESCRIPTION || 'N/A'}\nNode: ${node.NODEID || 'N/A'}`,
-          fullDetails: node
-        })));
-        const edges = new vis.DataSet(data.edges);
+    // Hardcoded minimal JSON for testing
+    const testData = {
+      nodes: [
+        { id: "Job1", label: "Job1" },
+        { id: "Job2", label: "Job2" }
+      ],
+      edges: [
+        { from: "Job1", to: "Job2" }
+      ]
+    };
 
-        const container = document.getElementById('network');
-        const graphData = { nodes: nodes, edges: edges };
-        const options = {
-          nodes: {
-            shape: 'dot',
-            size: 15,
-            font: { size: 12 },
-            borderWidth: 2
-          },
-          edges: {
-            arrows: 'to',
-            smooth: { type: 'curvedCW' }
-          },
-          layout: {
-            hierarchical: {
-              direction: 'UD',
-              sortMethod: 'directed'
-            }
-          },
-          physics: false,
-          interaction: { hover: true, tooltipDelay: 200 }
-        };
+    try {
+      const nodes = new vis.DataSet(testData.nodes);
+      const edges = new vis.DataSet(testData.edges);
+      const container = document.getElementById('network');
+      const graphData = { nodes: nodes, edges: edges };
+      const options = {
+        nodes: { shape: 'dot', size: 15, font: { size: 12 }, borderWidth: 2 },
+        edges: { arrows: 'to', smooth: { type: 'curvedCW' } },
+        layout: { hierarchical: { direction: 'UD', sortMethod: 'directed' } },
+        physics: false
+      };
 
-        const network = new vis.Network(container, graphData, options);
-
-        network.on('click', function(params) {
-          const detailsDiv = document.getElementById('details');
-          if (params.nodes.length > 0) {
-            const nodeId = params.nodes[0];
-            const node = nodes.get(nodeId);
-            const details = node.fullDetails;
-            detailsDiv.innerHTML = `
-              <h3>${details.JOBNAME}</h3>
-              <p><strong>Description:</strong> ${details.DESCRIPTION || 'N/A'}</p>
-              <p><strong>Node ID:</strong> ${details.NODEID || 'N/A'}</p>
-              <p><strong>Command Line:</strong> ${details.CMDLINE || 'N/A'}</p>
-              <p><strong>Weeks Calendar:</strong> ${details.WEEKSCAL || 'N/A'}</p>
-              <p><strong>In Conditions:</strong> ${details.INCOND ? JSON.stringify(details.INCOND, null, 2) : 'None'}</p>
-              <p><strong>Out Conditions:</strong> ${details.OUTCOND ? JSON.stringify(details.OUTCOND, null, 2) : 'None'}</p>
-            `;
-          } else {
-            detailsDiv.innerHTML = 'Click a job to see details here...';
-          }
-        });
-      })
-      .catch(error => console.error('Error loading JSON:', error));
+      const network = new vis.Network(container, graphData, options);
+      console.log('Graph rendered successfully with test data');
+    } catch (error) {
+      console.error('Error with test data:', error);
+      document.getElementById('details').innerHTML = `Test Error: ${error.message}`;
+    }
   </script>
 </body>
 </html>
