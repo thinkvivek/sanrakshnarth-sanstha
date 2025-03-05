@@ -1,4 +1,4 @@
-import oracledb
+import cx_Oracle
 import configparser
 import sys
 import pandas as pd
@@ -19,14 +19,14 @@ def read_config(config_file):
         sys.exit(1)
 
 def connect_and_execute(sql_file, output_to_csv=False):
-    """Connect to Oracle DB and execute the SQL script."""
+    """Connect to Oracle DB and execute the SQL script using cx_Oracle."""
     # Read config
     config_file = "ora.config"
     username, password, dsn = read_config(config_file)
     
     try:
         # Establish connection
-        connection = oracledb.connect(
+        connection = cx_Oracle.connect(
             user=username,
             password=password,
             dsn=dsn
@@ -72,7 +72,7 @@ def connect_and_execute(sql_file, output_to_csv=False):
             connection.commit()
             print(f"SQL script '{sql_file}' executed successfully (no output).")
         
-    except oracledb.Error as error:
+    except cx_Oracle.Error as error:
         print(f"Error connecting to Oracle or executing SQL: {error}")
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -87,7 +87,7 @@ def connect_and_execute(sql_file, output_to_csv=False):
 if __name__ == "__main__":
     # Check command-line arguments
     if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python run_oracle_sql.py <sql_file> [output_to_csv]")
+        print("Usage: python run_oracle_sql_cx.py <sql_file> [output_to_csv]")
         print("  <sql_file>: Path to the SQL file to execute")
         print("  [output_to_csv]: 'csv' to save output to CSV, omit to check True/False")
         sys.exit(1)
