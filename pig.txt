@@ -1,6 +1,0 @@
-
-gsk8capicmd_64 -keydb -create -db mycert.kdb -pw mypassword -type cms -stash
-
-gsk8capicmd_64 -cert -import -file mycert.pfx -type pkcs12 -target mycert.kdb -target_pw mypassword -new_label my_cert_label -pw pfx_password
-
-gsk8capicmd_64 -cert -list -db mycert.kdb -pw mypassword
