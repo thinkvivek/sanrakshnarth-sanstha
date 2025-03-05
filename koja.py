@@ -23,7 +23,7 @@ def read_config(config_file):
         print(f"Error: Missing key {e} in {config_file}")
         sys.exit(1)
 
-def connect_and_execute(sql_file_name, is_txt=False):
+def connect_and_execute(sql_file_name, output_file_name=None):
     """Connect to Oracle DB and execute the SQL script."""
     # Read all parameters from config
     config_file = "ora.config"
@@ -60,9 +60,9 @@ def connect_and_execute(sql_file_name, is_txt=False):
             rows = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
             
-            if is_txt:
+            if output_file_name:
                 # Save to text file with ~ delimiter
-                txt_file_path = Path(txt_path) / f"{sql_file_name.split('.')[0]}_output.txt"
+                txt_file_path = Path(txt_path) / output_file_name
                 txt_file_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
                 
                 with open(txt_file_path, 'w') as f:
@@ -102,13 +102,28 @@ def connect_and_execute(sql_file_name, is_txt=False):
 if __name__ == "__main__":
     # Check command-line arguments
     if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python run_oracle_sql_full_config.py <sql_file_name> [is_txt]")
+        print("Usage: python run_oracle_sql_with_filename.py <sql_file_name> [file_name.txt]")
         print("  <sql_file_name>: Name of the SQL file (e.g., query.sql)")
-        print("  [is_txt]: 'txt' to save output to text file with ~ delimiter, omit to check True/False")
+        print("  [file_name.txt]: Name of the output text file (e.g., output.txt), omit to check True/False")
         sys.exit(1)
     
     sql_file_name = sys.argv[1]
-    is_txt = len(sys.argv) == 3 and sys.argv[2].lower() == "txt"
+    output_file_name = sys.argv[2] if len(sys.argv) == 3 else None
+    
+    # Validate output file name if provided
+    if output_file_name and not output_file_name.endswith('.txt'):
+        print("Error: Output file name must end with '.txt'")
+        sys.exit(1)
     
     # Execute the script
-    connect_and_execute(sql_file_name, is_txt)
+    connect_and_execute(sql_file_name, output_file_name)
+
+
+[ORACLE]
+username=your_username
+password=your_password
+dsn=your_dsn
+
+[PATHS]
+sql_path=/path/to/sql/files
+txt_path=/path/to/txt/exports
