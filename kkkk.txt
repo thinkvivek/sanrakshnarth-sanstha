@@ -1,107 +1,92 @@
-import xml.etree.ElementTree as ET
-import json
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Control-M Job Dependency Graph</title>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    #network {
+      width: 100%;
+      height: 600px;
+      border: 1px solid lightgray;
+    }
+    #details {
+      width: 100%;
+      height: 200px;
+      overflow-y: auto;
+      border: 1px solid lightgray;
+      padding: 10px;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="network"></div>
+  <div id="details">Click a job to see details here...</div>
 
-def parse_control_m_xml(xml_file):
-    """
-    Parse Control-M XML and extract specified JOB properties and dependencies.
-    Returns a list of job dictionaries with details and dependencies.
-    """
-    tree = ET.parse(xml_file)
-    root = tree.getroot()
-    
-    jobs = []
-    
-    # Iterate through all JOB nodes under FOLDERs within DEFTABLE
-    for folder in root.findall('.//FOLDER'):
-        for job in folder.findall('JOB'):
-            # Extract specified JOB attributes
-            job_attrs = dict(job.attrib)
-            job_name = job_attrs.get('JOBNAME')
-            if not job_name:
-                continue
-            
-            # Filter to only include requested properties
-            job_details = {
-                'JOBNAME': job_attrs.get('JOBNAME'),
-                'DESCRIPTION': job_attrs.get('DESCRIPTION'),
-                'NODEID': job_attrs.get('NODEID'),
-                'CMDLINE': job_attrs.get('CMDLINE'),
-                'WEEKSCAL': job_attrs.get('WEEKSCAL')
+  <script>
+    fetch('job_dependencies.json')
+      .then(response => response.json())
+      .then(data => {
+        const nodes = new vis.DataSet(data.nodes.map(node => ({
+          id: node.id,
+          label: node.JOBNAME,
+          title: `Job: ${node.JOBNAME}\nDesc: ${node.DESCRIPTION || 'N/A'}\nNode: ${node.NODEID || 'N/A'}`,
+          fullDetails: node
+        })));
+        const edges = new vis.DataSet(data.edges);
+
+        const container = document.getElementById('network');
+        const graphData = { nodes: nodes, edges: edges };
+        const options = {
+          nodes: {
+            shape: 'dot',
+            size: 15,
+            font: { size: 12 },
+            borderWidth: 2
+          },
+          edges: {
+            arrows: 'to',
+            smooth: { type: 'curvedCW' }
+          },
+          layout: {
+            hierarchical: {
+              direction: 'UD',
+              sortMethod: 'directed'
             }
-            
-            # Parse OUTCOND
-            outconds = job.findall('OUTCOND')
-            if outconds:
-                job_details['OUTCOND'] = [
-                    {
-                        'NAME': outcond.get('NAME'),
-                        'ODATE': outcond.get('ODATE'),
-                        'SIGN': outcond.get('SIGN')
-                    } for outcond in outconds
-                ]
-            
-            # Parse INCOND
-            inconds = job.findall('INCOND')
-            if inconds:
-                job_details['INCOND'] = [
-                    {
-                        'NAME': incond.get('NAME'),
-                        'ODATE': incond.get('ODATE'),
-                        'AND_OR': incond.get('AND_OR')
-                    } for incond in inconds
-                ]
-            
-            # Extract dependencies from INCOND NAME (assuming format like "JobX-DONE")
-            dependencies = []
-            if 'INCOND' in job_details:
-                for incond in job_details['INCOND']:
-                    cond_name = incond.get('NAME', '')
-                    if '-DONE' in cond_name:  # Adjust if your condition naming differs
-                        dep_job = cond_name.replace('-DONE', '')
-                        dependencies.append(dep_job)
-            
-            jobs.append({
-                "name": job_name,
-                "details": job_details,
-                "depends_on": dependencies
-            })
-    
-    return jobs
+          },
+          physics: false,
+          interaction: { hover: true, tooltipDelay: 200 }
+        };
 
-def create_graph_json(jobs):
-    """
-    Transform job data into a graph JSON format with nodes and edges.
-    """
-    nodes = [
-        {
-            "id": job["name"],
-            "label": job["name"],
-            **job["details"]
-        }
-        for job in jobs
-    ]
-    
-    edges = []
-    for job in jobs:
-        for dep in job["depends_on"]:
-            edges.append({"from": dep, "to": job["name"]})
-    
-    return {"nodes": nodes, "edges": edges}
+        const network = new vis.Network(container, graphData, options);
 
-def main():
-    xml_file = "control_m_jobs.xml"  # Replace with your XML file path
-    jobs = parse_control_m_xml(xml_file)
-    if not jobs:
-        print("No jobs found in the XML file.")
-        return
-    
-    graph_data = create_graph_json(jobs)
-    output_json = "job_dependencies.json"
-    with open(output_json, "w") as f:
-        json.dump(graph_data, f, indent=2)
-    
-    print(f"JSON file created: {output_json}")
-    print(f"Processed {len(jobs)} jobs with {len(graph_data['edges'])} dependencies.")
-
-if __name__ == "__main__":
-    main()
+        network.on('click', function(params) {
+          const detailsDiv = document.getElementById('details');
+          if (params.nodes.length > 0) {
+            const nodeId = params.nodes[0];
+            const node = nodes.get(nodeId);
+            const details = node.fullDetails;
+            detailsDiv.innerHTML = `
+              <h3>${details.JOBNAME}</h3>
+              <p><strong>Description:</strong> ${details.DESCRIPTION || 'N/A'}</p>
+              <p><strong>Node ID:</strong> ${details.NODEID || 'N/A'}</p>
+              <p><strong>Command Line:</strong> ${details.CMDLINE || 'N/A'}</p>
+              <p><strong>Weeks Calendar:</strong> ${details.WEEKSCAL || 'N/A'}</p>
+              <p><strong>In Conditions:</strong> ${details.INCOND ? JSON.stringify(details.INCOND, null, 2) : 'None'}</p>
+              <p><strong>Out Conditions:</strong> ${details.OUTCOND ? JSON.stringify(details.OUTCOND, null, 2) : 'None'}</p>
+            `;
+          } else {
+            detailsDiv.innerHTML = 'Click a job to see details here...';
+          }
+        });
+      })
+      .catch(error => console.error('Error loading JSON:', error));
+  </script>
+</body>
+</html>
