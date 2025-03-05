@@ -4,34 +4,36 @@ import sys
 from pathlib import Path
 
 def read_config(config_file):
-    """Read SQL and text file paths from a config file."""
+    """Read all parameters from the config file."""
     config = configparser.ConfigParser()
     config.read(config_file)
     
     try:
+        # Database connection details
+        username = config['ORACLE']['username']
+        password = config['ORACLE']['password']
+        dsn = config['ORACLE']['dsn']
+        
+        # File paths
         sql_path = config['PATHS']['sql_path']
-        txt_path = config['PATHS']['csv_path']  # Reusing 'csv_path' as txt_path
-        return sql_path, txt_path
+        txt_path = config['PATHS']['txt_path']
+        
+        return username, password, dsn, sql_path, txt_path
     except KeyError as e:
         print(f"Error: Missing key {e} in {config_file}")
         sys.exit(1)
 
 def connect_and_execute(sql_file_name, is_txt=False):
     """Connect to Oracle DB and execute the SQL script."""
-    # Read paths from config
+    # Read all parameters from config
     config_file = "ora.config"
-    sql_path, txt_path = read_config(config_file)
+    username, password, dsn, sql_path, txt_path = read_config(config_file)
     
     # Construct full SQL file path
     sql_file_path = Path(sql_path) / sql_file_name
     if not sql_file_path.exists():
         print(f"Error: SQL file '{sql_file_path}' not found.")
         sys.exit(1)
-    
-    # Database credentials (hardcoded for simplicity; consider env vars in production)
-    username = "your_username"
-    password = "your_password"
-    dsn = "your_dsn"  # e.g., "localhost:1521/orcl"
     
     try:
         # Establish connection
@@ -93,20 +95,4 @@ def connect_and_execute(sql_file_name, is_txt=False):
         # Clean up
         if 'cursor' in locals():
             cursor.close()
-        if 'connection' in locals() and connection:
-            connection.close()
-            print("Database connection closed.")
-
-if __name__ == "__main__":
-    # Check command-line arguments
-    if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python run_oracle_sql_with_txt.py <sql_file_name> [is_txt]")
-        print("  <sql_file_name>: Name of the SQL file (e.g., query.sql)")
-        print("  [is_txt]: 'txt' to save output to text file with ~ delimiter, omit to check True/False")
-        sys.exit(1)
-    
-    sql_file_name = sys.argv[1]
-    is_txt = len(sys.argv) == 3 and sys.argv[2].lower() == "txt"
-    
-    # Execute the script
-    connect_and_execute(sql_file_name, is_txt)
+        if 'connection' in locals
