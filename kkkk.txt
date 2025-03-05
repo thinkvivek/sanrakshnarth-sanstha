@@ -30,68 +30,55 @@
   <div id="details">Click a job to see details here...</div>
 
   <script>
-    fetch('job_dependencies.json')
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Failed to fetch JSON: ${response.status} - ${response.statusText}`);
-        }
-        return response.text(); // Get raw text first to debug
-      })
-      .then(text => {
-        console.log('Raw JSON text:', text); // Log raw content
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (e) {
-          throw new Error(`JSON Parse Error: ${e.message}`);
-        }
-        console.log('Parsed JSON:', data);
+    // Replace this with the content of your job_dependencies.json
+    const data = /* PASTE YOUR job_dependencies.json CONTENT HERE */ {
+      "nodes": [
+        {"id": "Job1", "JOBNAME": "Job1", "DESCRIPTION": "Start"},
+        {"id": "Job2", "JOBNAME": "Job2", "DESCRIPTION": "Next"}
+      ],
+      "edges": [
+        {"from": "Job1", "to": "Job2"}
+      ]
+    };
 
-        if (!data.nodes || !Array.isArray(data.nodes) || data.nodes.length === 0) {
-          throw new Error('No valid nodes found in JSON');
-        }
-        if (!data.edges || !Array.isArray(data.edges)) {
-          throw new Error('No valid edges found in JSON');
-        }
+    try {
+      const nodes = new vis.DataSet(data.nodes.map(node => ({
+        id: node.id,
+        label: node.JOBNAME || 'Unnamed',
+        title: `Job: ${node.JOBNAME || 'N/A'}\nDesc: ${node.DESCRIPTION || 'N/A'}\nNode: ${node.NODEID || 'N/A'}`,
+        fullDetails: node
+      })));
+      const edges = new vis.DataSet(data.edges);
 
-        const nodes = new vis.DataSet(data.nodes.map(node => ({
-          id: node.id,
-          label: node.JOBNAME || 'Unnamed',
-          title: `Job: ${node.JOBNAME || 'N/A'}\nDesc: ${node.DESCRIPTION || 'N/A'}\nNode: ${node.NODEID || 'N/A'}`,
-          fullDetails: node
-        })));
-        const edges = new vis.DataSet(data.edges);
+      const container = document.getElementById('network');
+      const graphData = { nodes: nodes, edges: edges };
+      const options = {
+        nodes: {
+          shape: 'dot',
+          size: 15,
+          font: { size: 12 },
+          borderWidth: 2
+        },
+        edges: {
+          arrows: 'to',
+          smooth: { type: 'curvedCW' }
+        },
+        layout: {
+          hierarchical: {
+            direction: 'UD',
+            sortMethod: 'directed'
+          }
+        },
+        physics: false,
+        interaction: { hover: true, tooltipDelay: 200 }
+      };
 
-        const container = document.getElementById('network');
-        const graphData = { nodes: nodes, edges: edges };
-        const options = {
-          nodes: {
-            shape: 'dot',
-            size: 15,
-            font: { size: 12 },
-            borderWidth: 2
-          },
-          edges: {
-            arrows: 'to',
-            smooth: { type: 'curvedCW' }
-          },
-          layout: {
-            hierarchical: {
-              direction: 'UD',
-              sortMethod: 'directed'
-            }
-          },
-          physics: false,
-          interaction: { hover: true, tooltipDelay: 200 }
-        };
-
-        const network = new vis.Network(container, graphData, options);
-        console.log('Graph rendered successfully');
-      })
-      .catch(error => {
-        console.error('Error:', error);
-        document.getElementById('details').innerHTML = `Error: ${error.message}<br>Check console for details.`;
-      });
+      const network = new vis.Network(container, graphData, options);
+      console.log('Graph rendered successfully');
+    } catch (error) {
+      console.error('Error:', error);
+      document.getElementById('details').innerHTML = `Error: ${error.message}`;
+    }
   </script>
 </body>
 </html>
