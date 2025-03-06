@@ -30,36 +30,27 @@ def execute_sql(sql_file):
         sys.exit(1)
 
     try:
-        # Connect to Oracle
-        connection = cx_Oracle.connect(
+        with cx_Oracle.connect(
             user=config["username"],
             password=config["password"],
             dsn=config["dsn"]
-        )
-        cursor = connection.cursor()
+        ) as connection:
+            with connection.cursor() as cursor:
+                with open(sql_file_path, "r") as file:
+                    sql_script = file.read()
 
-        # Read and execute SQL
-        with open(sql_file_path, "r") as file:
-            sql_script = file.read()
+                cursor.execute(sql_script)
+                rows = cursor.fetchall()
 
-        cursor.execute(sql_script)
-        rows = cursor.fetchall()
+                if rows and len(rows) == 1 and len(rows[0]) == 1:
+                    result = rows[0][0]
+                    return str(result).upper() in ("TRUE", "1", "Y", "YES")
 
-        if rows and len(rows) == 1 and len(rows[0]) == 1:
-            result = rows[0][0]
-            return str(result).upper() in ("TRUE", "1", "Y", "YES")
-
-        return False  # Default to False if unexpected result format
+                return False  # Default to False if unexpected result format
 
     except cx_Oracle.Error as e:
         print(f"Database error: {e}")
         sys.exit(1)
-
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'connection' in locals():
-            connection.close()
 
 def retry_logic(sql_file):
     """Runs the SQL every 5 minutes for an hour if the condition is False."""
@@ -85,7 +76,4 @@ if __name__ == "__main__":
         sys.exit(1)
 
     sql_file = sys.argv[1]
-    if execute_sql(sql_file):
-        print("Condition met, exiting successfully.")
-    else:
-        retry_logic(sql_file)
+  
