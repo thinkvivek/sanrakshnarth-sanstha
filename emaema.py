@@ -1,3 +1,5 @@
+0 6 * * 1-6 /path/to/your_script.sh
+
 import smtplib
 import pandas as pd
 import cx_Oracle
