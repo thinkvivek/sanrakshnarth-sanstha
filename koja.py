@@ -1,129 +1,43 @@
-import cx_Oracle
-import configparser
-import sys
-from pathlib import Path
+import psutil
+import time
+from datetime import datetime
 
-def read_config(config_file):
-    """Read all parameters from the config file."""
-    config = configparser.ConfigParser()
-    config.read(config_file)
-    
+def system_stats():
     try:
-        # Database connection details
-        username = config['ORACLE']['username']
-        password = config['ORACLE']['password']
-        dsn = config['ORACLE']['dsn']
+        print(f"CPU Usage: {psutil.cpu_percent(interval=1)}%")
+        print(f"Memory Usage: {psutil.virtual_memory().percent}%")
+        print(f"Disk Usage: {psutil.disk_usage('/').percent}%")
+        print("-" * 50)
         
-        # File paths
-        sql_path = config['PATHS']['sql_path']
-        txt_path = config['PATHS']['txt_path']
-        
-        return username, password, dsn, sql_path, txt_path
-    except KeyError as e:
-        print(f"Error: Missing key {e} in {config_file}")
-        sys.exit(1)
+        # Get top 5 longest running processes
+        get_long_running_processes()
 
-def connect_and_execute(sql_file_name, output_file_name=None):
-    """Connect to Oracle DB and execute the SQL script."""
-    # Read all parameters from config
-    config_file = "ora.config"
-    username, password, dsn, sql_path, txt_path = read_config(config_file)
-    
-    # Construct full SQL file path
-    sql_file_path = Path(sql_path) / sql_file_name
-    if not sql_file_path.exists():
-        print(f"Error: SQL file '{sql_file_path}' not found.")
-        sys.exit(1)
-    
-    try:
-        # Establish connection
-        connection = cx_Oracle.connect(
-            user=username,
-            password=password,
-            dsn=dsn
-        )
-        print("Connected to Oracle database successfully.")
-        
-        # Read SQL script
-        with open(sql_file_path, 'r') as file:
-            sql_script = file.read()
-        
-        # Create a cursor
-        cursor = connection.cursor()
-        
-        # Execute SQL script
-        cursor.execute(sql_script)
-        
-        # Check if it's a query (SELECT) or a DML/DDL statement
-        if sql_script.strip().upper().startswith("SELECT"):
-            # Fetch results
-            rows = cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description]
-            
-            if output_file_name:
-                # Save to text file with ~ delimiter
-                txt_file_path = Path(txt_path) / output_file_name
-                txt_file_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure directory exists
-                
-                with open(txt_file_path, 'w') as f:
-                    # Write header
-                    f.write('~'.join(columns) + '\n')
-                    # Write rows
-                    for row in rows:
-                        # Convert each value to string, handle None
-                        row_str = '~'.join(str(val) if val is not None else '' for val in row)
-                        f.write(row_str + '\n')
-                print(f"Output saved to {txt_file_path}")
-            else:
-                # Check if result is True (assuming a single row with a boolean-like value)
-                if rows and len(rows) == 1 and len(rows[0]) == 1:
-                    result = rows[0][0]
-                    is_true = str(result).upper() in ("TRUE", "1", "Y", "YES")
-                    print(f"Result is {'True' if is_true else 'False'}")
-                else:
-                    print("Result: ", rows)
-        else:
-            # For non-SELECT statements, commit the transaction
-            connection.commit()
-            print(f"SQL script '{sql_file_path}' executed successfully (no output).")
-        
-    except cx_Oracle.Error as error:
-        print(f"Error connecting to Oracle or executing SQL: {error}")
     except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        # Clean up
-        if 'cursor' in locals():
-            cursor.close()
-        if 'connection' in locals() and connection:
-            connection.close()
-            print("Database connection closed.")
+        print(f"Error fetching system stats: {e}")
+
+def get_long_running_processes():
+    try:
+        processes = []
+        for proc in psutil.process_iter(attrs=['pid', 'name', 'create_time']):
+            try:
+                create_time = datetime.fromtimestamp(proc.info['create_time'])  # Convert timestamp to datetime
+                processes.append((proc.info['pid'], proc.info['name'], create_time))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue  # Skip processes that no longer exist or are restricted
+
+        # Sort by start time (oldest first) and get top 5
+        processes.sort(key=lambda x: x[2])
+        top_5 = processes[:5]
+
+        print("Top 5 Longest Running Processes:")
+        for pid, name, start_time in top_5:
+            print(f"PID: {pid} | Name: {name} | Started at: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print("-" * 50)
+
+    except Exception as e:
+        print(f"Error fetching process info: {e}")
 
 if __name__ == "__main__":
-    # Check command-line arguments
-    if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python run_oracle_sql_with_filename.py <sql_file_name> [file_name.txt]")
-        print("  <sql_file_name>: Name of the SQL file (e.g., query.sql)")
-        print("  [file_name.txt]: Name of the output text file (e.g., output.txt), omit to check True/False")
-        sys.exit(1)
-    
-    sql_file_name = sys.argv[1]
-    output_file_name = sys.argv[2] if len(sys.argv) == 3 else None
-    
-    # Validate output file name if provided
-    if output_file_name and not output_file_name.endswith('.txt'):
-        print("Error: Output file name must end with '.txt'")
-        sys.exit(1)
-    
-    # Execute the script
-    connect_and_execute(sql_file_name, output_file_name)
-
-
-[ORACLE]
-username=your_username
-password=your_password
-dsn=your_dsn
-
-[PATHS]
-sql_path=/path/to/sql/files
-txt_path=/path/to/txt/exports
+    while True:  # Continuous monitoring
+        system_stats()
+        time.sleep(5)  # Refresh every 5 seconds
