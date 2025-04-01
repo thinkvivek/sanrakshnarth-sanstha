@@ -75,3 +75,22 @@ if __name__ == "__main__":
         print(f"Error: Input folder '{INPUT_FOLDER}' does not exist.")
     else:
         process_dtsx_files(INPUT_FOLDER, OUTPUT_FILE)
+
+
+
+
+SELECT * 
+FROM (
+    SELECT 
+        DATEPART(HOUR, timestamp_column) AS HourOfDay, 
+        COUNT(*) AS RecordCount
+    FROM XYZ
+    WHERE CAST(timestamp_column AS DATE) = '2024-03-31'  -- Replace with your date
+    GROUP BY DATEPART(HOUR, timestamp_column)
+) SourceTable
+PIVOT (
+    SUM(RecordCount) 
+    FOR HourOfDay IN ([0], [1], [2], [3], [4], [5], [6], [7], [8], [9], [10], [11], 
+                      [12], [13], [14], [15], [16], [17], [18], [19], [20], [21], [22], [23])
+) PivotTable;
+
