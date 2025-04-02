@@ -18,12 +18,15 @@ def extract_sql_queries(ssis_file):
     
     sql_statements = []
     
-    # Find Execute SQL Tasks (Extract queries)
+    # Find Execute SQL Tasks and extract queries
     for sql_task in root.findall(".//DTS:Executable", namespaces):
-        if sql_task.get("{www.microsoft.com/SqlServer/Dts}ExecutableType") == "Microsoft.ExecuteSQLTask":
-            for sql_property in sql_task.findall(".//SQLTask:SqlStatementSource", namespaces):
-                if sql_property.text:
-                    sql_statements.append(sql_property.text.strip())
+        # Look for SQL Task data
+        sql_task_data = sql_task.find(".//DTS:SqlTaskData", namespaces)
+        if sql_task_data is not None:
+            # Now find the SQL statement source
+            sql_statement_source = sql_task_data.find(".//SQLTask:SqlStatementSource", namespaces)
+            if sql_statement_source is not None and sql_statement_source.text:
+                sql_statements.append(sql_statement_source.text.strip())
     
     # Find Data Flow Task Components (Merge Joins, Sorts, Derived Columns)
     for component in root.findall(".//DTS:Component", namespaces):
@@ -65,14 +68,18 @@ def generate_sql_script(sql_statements):
     return "\n".join(sql_script)
 
 # Usage
-ssis_file = "path/to/your/package.dtsx"  # Replace with actual path
+ssis_file = "path/to/your/package.dtsx"  # Replace with the actual path to your SSIS file
+
+# Step 1: Extract SQL queries from SSIS file
 sql_statements = extract_sql_queries(ssis_file)
 
-print("Extracted SQL Statements:", sql_statements)  # Debugging
+# Debugging: Print extracted SQL statements
+print("Extracted SQL Statements:", sql_statements)
 
+# Step 2: Generate SQL script from extracted statements
 sql_script = generate_sql_script(sql_statements)
 
-# Save to file
+# Step 3: Save the SQL script to a file
 with open("converted_ssis_script.sql", "w") as file:
     file.write(sql_script)
 
