@@ -1,86 +1,99 @@
 import xml.etree.ElementTree as ET
 
-def get_namespaces(ssis_file):
-    """Extracts XML namespaces from the SSIS package."""
-    namespaces = {}
-    for event, elem in ET.iterparse(ssis_file, events=['start-ns']):
-        prefix, uri = elem
-        namespaces[prefix] = uri
-    print("Extracted Namespaces:", namespaces)  # Debugging step
-    return namespaces
-
-def extract_sql_queries(ssis_file):
-    """Parses SSIS XML and extracts SQL queries from Execute SQL Tasks and Data Flow components."""
-    tree = ET.parse(ssis_file)
+def extract_sql_queries(xml_file):
+    tree = ET.parse(xml_file)
     root = tree.getroot()
     
-    namespaces = get_namespaces(ssis_file)  # Dynamically get namespaces
+    # Define namespaces
+    namespaces = {'DTS': 'www.microsoft.com/SqlServer/Dts', 'SQLTask': 'www.microsoft.com/SqlServer/Dts/Tasks'}
     
-    sql_statements = []
+    sql_queries = []
+    merge_joins = []
+    sorts = []
+    derived_columns = []
     
-    # Find Execute SQL Tasks and extract queries
-    for sql_task in root.findall(".//DTS:Executable", namespaces):
-        # Look for SQL Task data
-        sql_task_data = sql_task.find(".//DTS:SqlTaskData", namespaces)
-        if sql_task_data is not None:
-            # Now find the SQL statement source
-            sql_statement_source = sql_task_data.find(".//SQLTask:SqlStatementSource", namespaces)
-            if sql_statement_source is not None and sql_statement_source.text:
-                sql_statements.append(sql_statement_source.text.strip())
+    # Extract SQL queries
+    for sql_task in root.findall(".//DTS:Executable/DTS:ObjectData/SQLTask:SQLTaskData", namespaces):
+        query = sql_task.get("SQLTask:SqlStatementSource")
+        if query:
+            sql_queries.append(query)
     
-    # Find Data Flow Task Components (Merge Joins, Sorts, Derived Columns)
-    for component in root.findall(".//DTS:Component", namespaces):
-        component_name = component.get("refId", "Unknown Component")
+    # Extract components like Merge Joins, Sorts, Derived Columns
+    for component in root.findall(".//component"):
+        for prop in component.findall("./properties/property"):
+            if prop.get("description") == "The SQL command to be executed." and prop.text:
+                sql_queries.append(prop.text)
         
-        if "Merge Join" in component_name:
-            sql_statements.append(f"-- Merge Join found in {component_name}")
-        elif "Sort" in component_name:
-            sql_statements.append(f"-- Sorting applied in {component_name}")
-        elif "Derived Column" in component_name:
-            sql_statements.append(f"-- Derived Column transformation in {component_name}")
-
-    return sql_statements
-
-def generate_sql_script(sql_statements):
-    """Generates a SQL Server script from extracted SQL queries and transformations."""
-    sql_script = ["-- Generated SQL Script from SSIS Data Flow"]
-    
-    temp_table_counter = 1
-    prev_temp_table = None
-    
-    for statement in sql_statements:
-        if statement.startswith("--"):  
-            sql_script.append(statement)  # Keep comments
-        else:
-            temp_table = f"#temp{temp_table_counter}"
-            if prev_temp_table:
-                sql_script.append(f"SELECT * INTO {temp_table} FROM ({statement}) AS derived_table;")
-            else:
-                sql_script.append(statement.replace(" INTO ", f" INTO {temp_table} "))  # Modify INTO statements
+        # Identify Merge Joins
+        if 'MergeJoin' in component.get("name", ""):
+            merge_joins.append(component)
         
-            prev_temp_table = temp_table
-            temp_table_counter += 1
+        # Identify Sorts
+        if 'Sort' in component.get("name", ""):
+            sorts.append(component)
+        
+        # Identify Derived Columns
+        if 'DerivedColumn' in component.get("name", ""):
+            derived_columns.append(component)
     
-    sql_script.append("-- Final Output Selection")
-    if prev_temp_table:
-        sql_script.append(f"SELECT * FROM {prev_temp_table};")
+    return sql_queries, merge_joins, sorts, derived_columns
 
-    return "\n".join(sql_script)
 
-# Usage
-ssis_file = "path/to/your/package.dtsx"  # Replace with the actual path to your SSIS file
+def generate_sql_script(sql_queries, merge_joins, sorts, derived_columns):
+    sql_script = """-- Generated SQL Server Script\n\n"""
+    
+    temp_table_count = 1
+    temp_tables = []
+    
+    # Convert extracted SQL queries into temporary tables
+    for query in sql_queries:
+        temp_table = f"#TempTable{temp_table_count}"
+        temp_tables.append(temp_table)
+        sql_script += f"SELECT * INTO {temp_table} FROM ({query}) AS SourceQuery;\n\n"
+        temp_table_count += 1
+    
+    # Handle Merge Joins
+    for merge in merge_joins:
+        left_table = temp_tables.pop(0)
+        right_table = temp_tables.pop(0)
+        join_type = 'LEFT JOIN' if 'Left' in merge.get('name', '') else 'RIGHT JOIN'
+        result_table = f"#TempTable{temp_table_count}"
+        sql_script += f"SELECT * INTO {result_table} FROM {left_table} {join_type} {right_table} ON ...;\n\n"
+        temp_tables.append(result_table)
+        temp_table_count += 1
+    
+    # Handle Sorts
+    for sort in sorts:
+        input_table = temp_tables.pop(0)
+        result_table = f"#TempTable{temp_table_count}"
+        sql_script += f"SELECT * INTO {result_table} FROM {input_table} ORDER BY ...;\n\n"
+        temp_tables.append(result_table)
+        temp_table_count += 1
+    
+    # Handle Derived Columns
+    for derived in derived_columns:
+        input_table = temp_tables.pop(0)
+        result_table = f"#TempTable{temp_table_count}"
+        sql_script += f"SELECT *, -- Derived column expressions\nINTO {result_table}\nFROM {input_table};\n\n"
+        temp_tables.append(result_table)
+        temp_table_count += 1
+    
+    # Final Output
+    sql_script += f"SELECT * FROM {temp_tables[-1]};\n"
+    
+    return sql_script
 
-# Step 1: Extract SQL queries from SSIS file
-sql_statements = extract_sql_queries(ssis_file)
 
-# Debugging: Print extracted SQL statements
-print("Extracted SQL Statements:", sql_statements)
+def main(xml_file):
+    sql_queries, merge_joins, sorts, derived_columns = extract_sql_queries(xml_file)
+    sql_script = generate_sql_script(sql_queries, merge_joins, sorts, derived_columns)
+    
+    with open("output.sql", "w") as f:
+        f.write(sql_script)
+    
+    print("SQL script generated and saved as output.sql")
 
-# Step 2: Generate SQL script from extracted statements
-sql_script = generate_sql_script(sql_statements)
 
-# Step 3: Save the SQL script to a file
-with open("converted_ssis_script.sql", "w") as file:
-    file.write(sql_script)
-
-print("SQL script generated successfully!")
+if __name__ == "__main__":
+    xml_file = "ssis_package.dtsx"  # Replace with your actual file path
+    main(xml_file)
