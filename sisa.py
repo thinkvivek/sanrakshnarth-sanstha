@@ -6,6 +6,7 @@ def get_namespaces(ssis_file):
     for event, elem in ET.iterparse(ssis_file, events=['start-ns']):
         prefix, uri = elem
         namespaces[prefix] = uri
+    print("Extracted Namespaces:", namespaces)  # Debugging step
     return namespaces
 
 def extract_sql_queries(ssis_file):
@@ -18,13 +19,14 @@ def extract_sql_queries(ssis_file):
     sql_statements = []
     
     # Find Execute SQL Tasks (Extract queries)
-    for sql_task in root.findall(".//{*}Executable[@DTS:ExecutableType='Microsoft.ExecuteSQLTask']", namespaces):
-        for sql_property in sql_task.findall(".//{*}ObjectData//{*}SqlStatementSource", namespaces):
-            if sql_property.text:
-                sql_statements.append(sql_property.text.strip())
+    for sql_task in root.findall(".//DTS:Executable", namespaces):
+        if sql_task.get("{www.microsoft.com/SqlServer/Dts}ExecutableType") == "Microsoft.ExecuteSQLTask":
+            for sql_property in sql_task.findall(".//SQLTask:SqlStatementSource", namespaces):
+                if sql_property.text:
+                    sql_statements.append(sql_property.text.strip())
     
     # Find Data Flow Task Components (Merge Joins, Sorts, Derived Columns)
-    for component in root.findall(".//{*}Component", namespaces):
+    for component in root.findall(".//DTS:Component", namespaces):
         component_name = component.get("refId", "Unknown Component")
         
         if "Merge Join" in component_name:
@@ -65,6 +67,9 @@ def generate_sql_script(sql_statements):
 # Usage
 ssis_file = "path/to/your/package.dtsx"  # Replace with actual path
 sql_statements = extract_sql_queries(ssis_file)
+
+print("Extracted SQL Statements:", sql_statements)  # Debugging
+
 sql_script = generate_sql_script(sql_statements)
 
 # Save to file
