@@ -50,3 +50,29 @@ class CsvMerger
         Console.WriteLine($"Merged {csvFiles.Count} file(s) containing keyword '{keyword}' into: {outputFilePath}");
     }
 }
+
+
+
+
+
+public static void MergeCsvs(string folder, string keyword, string outputFile)
+{
+    var files = Directory.GetFiles(folder, "*.csv")
+                         .Where(f => Path.GetFileName(f).Contains(keyword, StringComparison.OrdinalIgnoreCase));
+
+    using var writer = new StreamWriter(outputFile);
+    bool wroteHeader = false;
+
+    foreach (var file in files)
+    {
+        var lines = File.ReadLines(file);
+        if (!wroteHeader) {
+            foreach (var line in lines) writer.WriteLine(line); // write all lines including header
+            wroteHeader = true;
+        }
+        else {
+            foreach (var line in lines.Skip(1)) writer.WriteLine(line); // skip header
+        }
+    }
+}
+
