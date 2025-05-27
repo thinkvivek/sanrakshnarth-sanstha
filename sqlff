@@ -217,3 +217,17 @@ namespace SqlQueryFormatter
         </Style>
     </Application.Resources>
 </Application>
+
+
+SELECT
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') = 'MON' THEN 'X' END) AS MON,
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') = 'TUE' THEN 'X' END) AS TUE,
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') = 'WED' THEN 'X' END) AS WED,
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') = 'THU' THEN 'X' END) AS THU,
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') = 'FRI' THEN 'X' END) AS FRI,
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') = 'SAT' THEN 'X' END) AS SAT,
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') = 'SUN' THEN 'X' END) AS SUN
+FROM
+  trigger_log
+WHERE
+  trigger_name = :trigger_name;  -- use bind variable or replace with 'YOUR_TRIGGER_NAME'
