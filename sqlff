@@ -231,3 +231,47 @@ FROM
   trigger_log
 WHERE
   trigger_name = :trigger_name;  -- use bind variable or replace with 'YOUR_TRIGGER_NAME'
+
+
+SELECT
+  TO_CHAR(insert_date, 'MONTH', 'NLS_DATE_LANGUAGE=ENGLISH') AS MONTH_NAME,
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '01' THEN '1' END) AS "1",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '02' THEN '1' END) AS "2",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '03' THEN '1' END) AS "3",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '04' THEN '1' END) AS "4",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '05' THEN '1' END) AS "5",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '06' THEN '1' END) AS "6",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '07' THEN '1' END) AS "7",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '08' THEN '1' END) AS "8",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '09' THEN '1' END) AS "9",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '10' THEN '1' END) AS "10",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '11' THEN '1' END) AS "11",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '12' THEN '1' END) AS "12",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '13' THEN '1' END) AS "13",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '14' THEN '1' END) AS "14",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '15' THEN '1' END) AS "15",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '16' THEN '1' END) AS "16",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '17' THEN '1' END) AS "17",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '18' THEN '1' END) AS "18",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '19' THEN '1' END) AS "19",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '20' THEN '1' END) AS "20",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '21' THEN '1' END) AS "21",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '22' THEN '1' END) AS "22",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '23' THEN '1' END) AS "23",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '24' THEN '1' END) AS "24",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '25' THEN '1' END) AS "25",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '26' THEN '1' END) AS "26",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '27' THEN '1' END) AS "27",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '28' THEN '1' END) AS "28",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '29' THEN '1' END) AS "29",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '30' THEN '1' END) AS "30",
+  MAX(CASE WHEN TO_CHAR(insert_date, 'DD') = '31' THEN '1' END) AS "31"
+FROM
+  trigger_log
+WHERE
+  trigger_name = :trigger_name -- or hardcode 'MY_TRIGGER'
+GROUP BY
+  TO_CHAR(insert_date, 'MONTH', 'NLS_DATE_LANGUAGE=ENGLISH')
+ORDER BY
+  TO_DATE(TO_CHAR(insert_date, 'MM'), 'MM');  -- ensures correct month order
+
