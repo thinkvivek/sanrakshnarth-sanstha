@@ -1,0 +1,51 @@
+param(
+    [string]$connectionString,
+    [string]$storedProcName
+)
+
+# Parse legacy connection string into a dictionary
+$dict = @{}
+$connectionString -split ";" | ForEach-Object {
+    $kv = $_ -split "=", 2
+    if ($kv.Count -eq 2) {
+        $dict[$kv[0].Trim()] = $kv[1].Trim()
+    }
+}
+
+# Convert to .NET SQL Client connection string
+$server = $dict['Data Source']
+$database = $dict['Initial Catalog']
+$user = $dict['User ID']
+$password = $dict['Password']
+$trusted = "False"
+
+$newConnString = "Server=$server;Database=$database;User ID=$user;Password=$password;Trusted_Connection=$trusted"
+
+# Connect to SQL Server
+$connection = New-Object System.Data.SqlClient.SqlConnection $newConnString
+$connection.Open()
+
+# Execute stored procedure
+$command = $connection.CreateCommand()
+$command.CommandText = $storedProcName
+$command.CommandType = [System.Data.CommandType]::StoredProcedure
+
+$reader = $command.ExecuteReader()
+
+$tableIndex = 1
+
+do {
+    $table = New-Object System.Data.DataTable
+    $table.Load($reader)
+
+    if ($table.Rows.Count -gt 0) {
+        $csvPath = "result_$tableIndex.csv"
+        $table | ForEach-Object {
+            ($_.ItemArray -join '|') | Out-File -FilePath $csvPath -Encoding utf8 -Append
+        }
+        $tableIndex++
+    }
+} while ($reader.NextResult())
+
+$reader.Close()
+$connection.Close()
