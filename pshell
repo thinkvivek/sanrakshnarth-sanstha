@@ -49,3 +49,16 @@ do {
 
 $reader.Close()
 $connection.Close()
+
+
+@echo off
+setlocal EnableDelayedExpansion
+
+REM Define your full connection string
+set "conn_string=Data Source=server_name;Initial Catalog=DB Name;User ID=hhh;Password=ggg;Provider=SQLNCLI10.1;Auto Translate=False"
+
+REM Call PowerShell and wrap the argument in escaped quotes
+powershell.exe -ExecutionPolicy Bypass -Command ^
+  "& { param([string]$c,[string]$s); .\run_stored_proc.ps1 -connectionString $c -storedProcName $s }" ^
+  -- "!conn_string!" "usp_MyProc"
+
