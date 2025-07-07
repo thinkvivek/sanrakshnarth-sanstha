@@ -1,147 +1,99 @@
-import pypdf
+import camelot
 import re
-import csv
-import os
 
-def extract_text_from_pdf(pdf_path):
-    """
-    Extracts text from all pages of a PDF file.
+# === Configuration ===
+pdf_file = r"C:\GitHub\13flist2025q2.pdf"
+output_txt = r"C:\GitHub\output12_final.txt"
+output_csv = r"C:\GitHub\final_output_updated.csv"
+DELIMITER = "|"  # You can change this to ',' or '\t' if needed
 
-    Args:
-        pdf_path (str): The path to the PDF file.
+# === Step 1: Extract and Clean Tables from PDF ===
+print("📄 Reading PDF tables...")
+tables = camelot.read_pdf(pdf_file, flavor="stream", pages='3-end')
 
-    Returns:
-        str: The extracted text from the PDF.
-    """
-    if not os.path.exists(pdf_path):
-        return f"Error: The file '{pdf_path}' was not found."
+with open(output_txt, "w", encoding="utf-8") as f:
+    for table in tables:
+        df = table.df
+        for _, row in df.iterrows():
+            cleaned_row = [
+                cell.replace("\n", " ").replace("\r", " ").strip()
+                for cell in row
+            ]
+            f.write(f" {DELIMITER} ".join(cleaned_row) + "\n")
 
-    try:
-        reader = pypdf.PdfReader(pdf_path)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text()
-        return text
-    except Exception as e:
-        return f"An error occurred while reading the PDF: {e}"
+print(f"✅ Cleaned data written to: {output_txt}")
 
-def parse_securities_data(pdf_text):
-    """
-    Parses the text of the 13F securities list to extract tabular data.
+# === Step 2: Parse Cleaned Data and Write Final CSV ===
+rows = []
+total_count_from_file = None
 
-    Args:
-        pdf_text (str): The text extracted from the PDF.
-
-    Returns:
-        list: A list of dictionaries, where each dictionary represents a security.
-    """
-    data = []
-    last_cusip_base = ""
-    last_check_digit = ""
-
-    # Regex to find all content within double quotes on a line
-    quote_pattern = re.compile(r'"(.*?)"')
-
-    lines = pdf_text.split('\n')
-
-    for line in lines:
+with open(output_txt, "r", encoding="utf-8") as infile:
+    for line in infile:
         line = line.strip()
-        if not line or 'Run Date:' in line or 'CUSIP NO' in line or '** List of Section 13F Securities **' in line:
+
+        # ✅ Check for Total Count line
+        match = re.search(r"Total\s+Count\s*:\s*([\d,]+)", line, re.IGNORECASE)
+        if match:
+            total_count_from_file = int(match.group(1).replace(",", ""))
             continue
 
-        parts = quote_pattern.findall(line)
-        
-        if not parts:
+        # ✅ Skip irrelevant lines
+        if not line or line.startswith("Run") or line.startswith("CUSIP"):
             continue
 
-        try:
-            # A main entry has a CUSIP prefix with a space, e.g., "B38564 10 "
-            if ' ' in parts[0] and len(parts[0].strip().replace(' ', '')) == 8:
-                cusip_part1 = parts[0].strip().replace(' ', '')
-                last_cusip_base = cusip_part1[:6]
-                
-                check_digit_part = parts[1].strip()
-                # The check digit is the first numeric character
-                check_digit_match = re.search(r'\d', check_digit_part)
-                if check_digit_match:
-                    last_check_digit = check_digit_match.group(0)
-                
-                cusip = cusip_part1 + last_check_digit
-                issuer_name = parts[2].strip()
-                issuer_desc = parts[3].strip()
-                status = parts[4].strip() if len(parts) > 4 else ""
-            # An option entry might start with a 2-digit number
-            elif parts[0].strip().isdigit() and len(parts[0].strip()) <= 2 and last_cusip_base:
-                cusip_part2 = parts[0].strip()
-                # The check digit is often inherited from the parent security
-                cusip = last_cusip_base + cusip_part2 + last_check_digit
-                issuer_name = parts[1].strip()
-                issuer_desc = parts[2].strip()
-                status = parts[3].strip() if len(parts) > 3 else ""
-            else:
-                # Skip lines that do not match the expected patterns
+        if line.count(DELIMITER) >= 3:
+            # 🧱 Pipe-formatted row (special page format)
+            parts = [part.strip() for part in line.split(DELIMITER)]
+            if len(parts) < 3:
+                continue
+            raw_cusip = parts[0]
+            cleaned_cusip = raw_cusip.replace(" ", "").replace("*", "")
+            issuer = parts[1]
+            description = parts[2]
+            status = parts[3] if len(parts) > 3 else ""
+        else:
+            # 🪜 Fixed-width row
+            pipe_index = line.find(DELIMITER)
+            if pipe_index == -1:
                 continue
 
-            data.append({
-                'Cusip': cusip,
-                'issuer name': issuer_name,
-                'issuer description': issuer_desc,
-                'status': status
-            })
-        except IndexError:
-            # This will catch lines that don't have the expected number of parts
-            print(f"Warning: Could not parse line: {line}")
+            left_part = line[:pipe_index].ljust(60)
+            right_part = line[pipe_index + 1:].strip()
+
+            raw_cusip = left_part[:14].strip()
+            cleaned_cusip = raw_cusip.replace(" ", "").replace("*", "")
+            issuer = left_part[14:43].strip()
+            description = left_part[43:pipe_index].strip()
+
+            if "ADDED" in right_part:
+                status = "ADDED"
+            elif "DELETED" in right_part:
+                status = "DELETED"
+            else:
+                status = ""
+
+        # ✅ Ensure line doesn't start with | or ,
+        if not cleaned_cusip or cleaned_cusip.startswith((DELIMITER, ",")):
             continue
-            
-    return data
 
-def write_to_csv(data, filename="extracted_data.csv"):
-    """
-    Writes the extracted data to a CSV file.
+        if cleaned_cusip and issuer and description:
+            rows.append(DELIMITER.join([cleaned_cusip, issuer, description, status]))
 
-    Args:
-        data (list): A list of dictionaries to write to the CSV.
-        filename (str): The name of the output CSV file.
-    """
-    if not data:
-        print("No data was extracted to write to CSV.")
-        return
+# === Step 3: Write CSV Output ===
+with open(output_csv, "w", encoding="utf-8") as outfile:
+    outfile.write(DELIMITER.join(["CUSIP", "ISSUER", "DESCRIPTION", "STATUS"]) + "\n")
+    for row in rows:
+        outfile.write(row + "\n")
 
-    try:
-        with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['Cusip', 'issuer name', 'issuer description', 'status']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+# === Step 4: Verify Total Count ===
+actual_count = len(rows)
 
-            writer.writeheader()
-            for row in data:
-                writer.writerow(row)
-        print(f"Successfully extracted data to '{filename}'")
-    except IOError as e:
-        print(f"Error writing to CSV file: {e}")
-
-def main():
-    """
-    Main function to extract, parse, and save the securities data.
-    """
-    pdf_path = "13flist2025q2.pdf"
-    
-    # Step 1: Extract text from the PDF
-    print(f"Extracting text from '{pdf_path}'...")
-    pdf_text = extract_text_from_pdf(pdf_path)
-    
-    if "Error:" in pdf_text:
-        print(pdf_text)
-        return
-
-    # Step 2: Parse the extracted text
-    print("Parsing securities data...")
-    extracted_data = parse_securities_data(pdf_text)
-
-    # Step 3: Write the parsed data to a CSV file
-    print("Writing data to CSV...")
-    write_to_csv(extracted_data)
-
-if __name__ == "__main__":
-    # Before running, ensure you have pypdf installed:
-    # pip install pypdf
-    main()
+print(f"🔢 Rows written to CSV (excluding header): {actual_count}")
+if total_count_from_file is not None:
+    print(f"📋 Total Count from text file: {total_count_from_file}")
+    if actual_count == total_count_from_file:
+        print("✅ Row count matches the total count from file.")
+    else:
+        print("⚠️  Row count does NOT match the total count from file!")
+else:
+    print("⚠️  Total count line not found in the text file.")
