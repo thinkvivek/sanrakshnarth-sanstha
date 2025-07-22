@@ -1,0 +1,50 @@
+import re
+import csv
+
+def parse_ctl_file(ctl_path):
+    """
+    Parses the CTL file and returns a list of tuples:
+    [(column_name, start, end), ...]
+    """
+    columns = []
+    with open(ctl_path, 'r') as ctl_file:
+        for line in ctl_file:
+            match = re.match(r'\s*(\w+)\s+POSITION\((\d+):(\d+)\)', line.strip(', \n'))
+            if match:
+                col_name = match.group(1)
+                start = int(match.group(2)) - 1  # Python is 0-indexed
+                end = int(match.group(3))        # slicing is exclusive, so we don't subtract 1
+                columns.append((col_name, start, end))
+    return columns
+
+def extract_fixed_width_data(data_path, columns):
+    """
+    Reads the data file and extracts values based on fixed-width columns.
+    """
+    extracted_data = []
+    with open(data_path, 'r') as data_file:
+        for line in data_file:
+            row = [line[start:end].strip() for (_, start, end) in columns]
+            extracted_data.append(row)
+    return extracted_data
+
+def write_csv(output_path, columns, data_rows):
+    """
+    Writes the output CSV with headers and extracted rows.
+    """
+    headers = [col[0] for col in columns]
+    with open(output_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(headers)
+        writer.writerows(data_rows)
+
+# ---- MAIN EXECUTION ----
+ctl_file = 'sample.ctl'       # path to .ctl file
+data_file = 'data.txt'        # path to fixed-width data file
+output_file = 'output.csv'    # output CSV path
+
+columns_info = parse_ctl_file(ctl_file)
+rows = extract_fixed_width_data(data_file, columns_info)
+write_csv(output_file, columns_info, rows)
+
+print(f"✅ CSV file created: {output_file}")
