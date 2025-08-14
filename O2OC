@@ -419,3 +419,231 @@ python ora_copy_universal.py \
   --enable-parallel-dml --target-degree 8 \
   --source-parallel-hint 8
 
+
+
+Big picture
+
+The script is a universal Oracle→Oracle copier that can take any SELECT from a .sql file and shovel the results into a target table as fast as Python can push, using:
+
+Parallelism (N worker threads, each running its own Oracle session pair)
+
+Chunking of the source result set (either by a real split column or, if you don’t have one, by ROWNUM windows)
+
+Large batch fetches (arraysize, prefetchrows) to cut round-trips
+
+Array DML (executemany) with big batches and rare commits to minimize logging/overhead
+
+Optional direct-path style inserts (/*+ APPEND_VALUES */), NOLOGGING, PARALLEL DML, and ALTER TABLE PARALLEL
+
+Optional source parallel hint to let Oracle parallelize the SELECT internally
+
+The program is careful to keep reads and writes streaming so memory stays flat while throughput stays high.
+
+Step-by-step logic
+1) Parse inputs and set fast defaults
+
+The program reads CLI args (source/target creds & DSNs, workers, splits, arraysize, batch size, etc.).
+
+Defaults are tuned for speed (e.g., workers≈min(8, cpu), arraysize/prefetch≈5k, batch_rows≈10k, commit_every≈200k).
+
+If you set ORACLE_CLIENT_LIB_DIR, it tries thick mode (Instant Client). Otherwise it uses thin mode. (Thick can be a few % faster.)
+
+2) Create two session pools
+
+One pool for source and one for target (oracledb.SessionPool), each sized so threads won’t wait.
+
+Pools are set to threaded=True with WAIT getmode, so workers block until a session is available (no busy loops).
+
+3) Load the user’s SQL and (optionally) wrap it with a parallel hint
+
+Reads --sql-file, strips any trailing semicolon.
+
+If --source-parallel-hint N is given, it wraps your SQL as:
+
+SELECT /*+ parallel(N) */ * FROM (<your_sql>)
+
+
+That encourages Oracle to use parallel query under the hood. (Doesn’t change results, just speed.)
+
+4) Prepare the target table (optional, but key for speed)
+
+Depending on flags, it can:
+
+TRUNCATE TABLE <target>
+
+ALTER TABLE <target> NOLOGGING
+
+ALTER TABLE <target> PARALLEL <N>
+
+ALTER SESSION ENABLE PARALLEL DML (done inside each worker too as needed)
+
+These reduce redo/logging and allow direct-path and parallel behaviors for very high throughput. (At the end, it restores LOGGING/NOPARALLEL if you asked it to change them.)
+
+5) Discover the column order once
+
+It runs SELECT * FROM (<your_sql>) WHERE 1=0 to grab column metadata (names in order).
+
+That order is used to build the INSERT statement:
+
+INSERT /*+ APPEND_VALUES */ INTO target(col1,...,colN) VALUES(:1,...,:N)
+
+
+(The APPEND_VALUES hint is optional, controlled by --append-values.)
+
+6) Decide how to chunk the workload
+Case A: You provide --split-column
+
+The script queries the source once:
+
+SELECT MIN(split_col), MAX(split_col) FROM (<your_sql>)
+
+
+It creates numeric/date ranges that cover [min,max] in --splits pieces (aiming for equal sizes).
+
+Each worker gets one range and runs:
+
+SELECT * FROM (<your_sql>)
+WHERE :lo <= split_col AND split_col < :hi
+
+
+This keeps chunks non-overlapping and pushes the pruning to Oracle.
+
+Each worker streams rows and bulk-inserts into the target.
+
+Note: in the provided code the worker uses < :hi for all chunks. That means rows exactly equal to the global MAX(split_col) are not included. Easiest fixes:
+• (a) make the last chunk use <= :hi, or
+• (b) pass a tiny epsilon to the last chunk’s :hi (e.g., max+1 for integers, max+interval '0.000001' second for timestamps).
+I can patch that for you in one line if you want.
+
+Case B: No split column (the universal path)
+
+The script first runs a COUNT:
+
+SELECT COUNT(1) FROM (<your_sql>)
+
+
+It divides 1..COUNT into --splits ROWNUM windows like [1..100k], [100001..200k], ....
+
+Each worker runs a two-level ROWNUM wrapper (classic, non-overlapping pagination):
+
+-- inner caps the stream at :hi
+SELECT t.*, ROWNUM rn FROM (<your_sql>) t WHERE ROWNUM <= :hi
+-- outer keeps only rows rn >= :lo
+SELECT * FROM ( <inner> ) WHERE rn >= :lo
+
+
+Because ROWNUM is assigned after predicates are applied in that order, each chunk gets a disjoint slice of the first :hi rows, then peels off the tail >= :lo.
+
+Every worker streams its slice and bulk-inserts.
+
+Important: without an ORDER BY, Oracle is free to choose any stable plan order. For static data and a single plan, chunks are non-overlapping and exhaustive. If rows are changing while you read, or if the plan/order differs across chunks, you can see duplicates/gaps. If you have any deterministic key, add ORDER BY key to your SQL for stable pagination, or prefer a real --split-column.
+
+7) Launch parallel workers (ThreadPoolExecutor)
+
+The main thread builds N futures (one per chunk) and submits them.
+
+Each worker:
+
+Acquires one session from source and one from target pools.
+
+Sets big arraysize and prefetchrows on the source cursor (e.g., 5k–10k+).
+
+Prepares the INSERT with placeholders for array DML.
+
+Executes its SELECT (range predicate or rownum window).
+
+In a loop: fetchmany(batch_rows) → executemany(insert_sql, rows) → occasionally commit().
+
+executemany collapses thousands of rows into a single round-trip.
+
+Commits are intentionally rare (e.g., every 200k rows) to reduce redo and log syncs.
+
+Returns the count inserted.
+
+As workers finish, the main thread aggregates counts and prints progress lines.
+
+8) Cleanup and restore
+
+After all futures complete:
+
+If you asked for NOLOGGING or PARALLEL, it restores:
+
+ALTER TABLE <target> LOGGING
+ALTER TABLE <target> NOPARALLEL
+
+
+Closes both pools.
+
+Prints a throughput line: total rows, seconds, rows/sec.
+
+Why it’s fast
+
+Multiple independent server-side cursors read in parallel → better CPU/IO utilization on the source.
+
+Big fetch arrays shrink network round-trips drastically.
+
+Array DML (executemany) + rare commits cut per-row overhead and redo generation.
+
+Direct-path style (APPEND_VALUES) writes bypass buffer cache (when allowed), laying blocks directly.
+
+NOLOGGING (optional) reduces redo during bulk load.
+
+PARALLEL on the table and PARALLEL DML let Oracle write in multiple slaves.
+
+Source parallel hint nudges Oracle to parallelize the SELECT internally (independent of client threads).
+
+Connection pools avoid reconnect cost and let threads grab sessions quickly.
+
+Important nuances & best practices
+
+ROWNUM chunking vs stability: Without an ORDER BY, the engine’s return order can vary. For truly rock-solid chunking, provide:
+
+a split column (best), or
+
+add a deterministic ORDER BY in your SQL (slower but stable).
+
+Last-chunk inclusion (split-column mode): fix to include the absolute MAX(...) as noted above.
+
+Constraints/triggers: direct-path + NOLOGGING can be blocked by triggers, FKs with immediate checks, etc. If you hit ORA errors, disable --append-values, or load into a staging table then MERGE.
+
+Memory: Everything is streamed. Batches are sized to keep RAM moderate (you control arraysize and batch_rows).
+
+Throughput tuning:
+
+Raise arraysize/prefetchrows (10k–50k) if memory/network allow.
+
+Raise batch_rows (10k–50k) if PGA permits.
+
+Increase workers and splits until either source or target CPUs saturate or you hit I/O/network limits.
+
+Absolute fastest (Oracle-native): When allowed, INSERT /*+ APPEND PARALLEL */ INTO tgt SELECT * FROM src@dblink or Data Pump over DB link will still beat Python—because it keeps the entire transfer inside Oracle’s C engine. Use this script when you need Python or need a universal client-side solution.
+
+What each key function does (map to code)
+
+init_client_if_available() – switches to thick mode if Instant Client is present.
+
+SessionPool(...) – builds source/target pools sized for concurrency.
+
+read_sql() – loads your SELECT.
+
+wrap_with_parallel_hint() – optionally adds /*+ parallel(N) */.
+
+get_column_list_from_subquery() – performs WHERE 1=0 probe to record column order.
+
+get_min_max() – finds min/max of the split column for range partitioning.
+
+get_total_count() – counts rows for ROWNUM windowing.
+
+make_numeric_ranges() – creates [lo, hi) partitions across min..max.
+
+make_rownum_ranges() – creates [lo, hi] ROWNUM windows across 1..COUNT.
+
+worker_range_splitcol() – runs the split-column query and inserts in batches.
+
+worker_range_rownum() – runs the ROWNUM two-level pagination query and inserts in batches.
+
+worker_insert_loop() – the tight loop: fetchmany → executemany → occasional commit.
+
+Want me to patch the last-chunk inclusion?
+
+If you’ll use the --split-column path, I recommend a tiny patch so the last chunk includes the max value (change the last worker’s predicate to <= :hi or bump the last :hi by an epsilon). Say the word and I’ll drop in the exact one-line fix for your data type (NUMBER vs DATE/TIMESTAMP).
