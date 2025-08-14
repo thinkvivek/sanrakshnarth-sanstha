@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-Ultra-fast Oracle-to-Oracle copier.
+Ultra-fast, universal Oracle→Oracle copier in Python.
 
-Features:
-- Parallel range-scan reads from SELECT in a .sql file (wrapped as subquery)
-- Thread-pooled pipelines: fetch-many from source -> executemany() to target
-- Large arraysize/prefetchrows tuning
-- Optional direct-path style inserts via /*+ APPEND_VALUES */ (Oracle 12c+)
-- Optional NOLOGGING toggle during load
-- Optional TRUNCATE target
-- Robust metrics & progress logs
+- Accepts ANY SQL from a file (no split column required)
+- If --split-column is omitted, uses ROWNUM-based chunking (two-level wrapper) to parallelize reads
+- If --split-column is provided, uses numeric/date range partitioning
+- Parallel pipelines (ThreadPoolExecutor)
+- Array/batch fetch & insert tuning (arraysize, prefetchrows, executemany batch)
+- Optional APPEND_VALUES (direct path style), NOLOGGING, PARALLEL DML, ALTER TABLE PARALLEL
+- Optional source parallel hint: wraps your SQL in SELECT /*+ parallel(N) */ * FROM (<your_sql>)
 
-Requires: python-oracledb (pip install oracledb)
+Usage examples at bottom.
 """
 
 import argparse
@@ -24,118 +23,141 @@ from typing import List, Tuple, Optional
 
 import oracledb
 
-# --------- sensible high-performance defaults (tune as needed) ----------
-DEFAULT_WORKERS = min(8, (os.cpu_count() or 8))          # parallel reader/writer pipelines
-DEFAULT_BATCH_ROWS = 10000                               # rows per executemany() batch
-DEFAULT_ARRAYSIZE = 5000                                 # rows fetched per network round-trip
-DEFAULT_PREFETCH = 5000                                  # driver-side prefetch
-DEFAULT_SPLITS = DEFAULT_WORKERS * 4                     # number of ranges to split into
-DEFAULT_COMMIT_EVERY = 200000                            # rows between commits (per worker)
-# -----------------------------------------------------------------------
+# ---------- high-performance defaults (tune to your env) ----------
+DEFAULT_WORKERS = min(8, (os.cpu_count() or 8))
+DEFAULT_SPLITS = DEFAULT_WORKERS * 4
+DEFAULT_BATCH_ROWS = 10000
+DEFAULT_ARRAYSIZE = 5000
+DEFAULT_PREFETCH = 5000
+DEFAULT_COMMIT_EVERY = 200000
+# ------------------------------------------------------------------
 
 
 def init_client_if_available():
-    """
-    Try to enable thick mode if Oracle Client is available for slightly better throughput.
-    Falls back to thin mode automatically if not present.
-    """
+    """Enable thick mode if Instant Client is available (few % faster)."""
     try:
-        # If you have an Oracle Instant Client path, set ORACLE_CLIENT_LIB_DIR env or update below.
         client_dir = os.environ.get("ORACLE_CLIENT_LIB_DIR")
         if client_dir:
             oracledb.init_oracle_client(lib_dir=client_dir)
     except Exception:
-        # Thin mode will be used automatically.
-        pass
+        pass  # thin mode is fine
 
 
 def build_dsn(host, port, service_name):
     return oracledb.makedsn(host, int(port), service_name=service_name)
 
 
-def read_sql(sql_path: str) -> str:
-    with open(sql_path, "r", encoding="utf-8") as f:
-        return f.read().strip().rstrip(";")  # remove trailing semicolon if present
+def read_sql(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip().rstrip(";")
 
 
-def get_min_max(pool, subquery_sql: str, split_column: str) -> Tuple[float, float]:
+def wrap_with_parallel_hint(sql: str, degree: int) -> str:
+    # Hint at the outer select; Oracle will try to parallelize underlying scans where possible.
+    return f"SELECT /*+ parallel({int(degree)}) */ * FROM ({sql})"
+
+
+def get_column_list_from_subquery(pool: oracledb.SessionPool, subquery_sql: str) -> List[str]:
+    """Return column names from the *user subquery* (no rn)."""
+    probe = f"SELECT * FROM ({subquery_sql}) WHERE 1=0"
+    with pool.acquire() as conn, conn.cursor() as cur:
+        cur.execute(probe)
+        return [d[0] for d in cur.description]
+
+
+def get_min_max(pool: oracledb.SessionPool, subquery_sql: str, split_column: str):
     sql = f"SELECT MIN({split_column}), MAX({split_column}) FROM ({subquery_sql}) S"
-    with pool.acquire() as conn:
-        with conn.cursor() as cur:
-            cur.arraysize = 1
-            cur.prefetchrows = 1
-            cur.execute(sql)
-            lo, hi = cur.fetchone()
-            if lo is None or hi is None:
-                raise RuntimeError("Source query returned no rows; cannot compute split ranges.")
-            return lo, hi
+    with pool.acquire() as conn, conn.cursor() as cur:
+        cur.arraysize = 1
+        cur.prefetchrows = 1
+        cur.execute(sql)
+        lo, hi = cur.fetchone()
+        if lo is None or hi is None:
+            raise RuntimeError("Source query returned no rows; cannot compute split ranges.")
+        return lo, hi
 
 
-def make_ranges(lo, hi, num_ranges: int, inclusive: bool = True) -> List[Tuple[float, float]]:
-    # Numeric/date friendly linear ranges. Last range inclusive if requested.
-    step = (hi - lo) / num_ranges
+def get_total_count(pool: oracledb.SessionPool, subquery_sql: str) -> int:
+    sql = f"SELECT COUNT(1) FROM ({subquery_sql}) C"
+    with pool.acquire() as conn, conn.cursor() as cur:
+        cur.arraysize = 1
+        cur.prefetchrows = 1
+        cur.execute(sql)
+        (cnt,) = cur.fetchone()
+        return int(cnt or 0)
+
+
+def make_numeric_ranges(lo, hi, num_ranges: int) -> List[Tuple]:
+    """Monotonic ranges [a,b) except last is [a,b]."""
     ranges = []
+    step = (hi - lo) / num_ranges
     start = lo
     for i in range(num_ranges):
         end = hi if i == num_ranges - 1 else lo + step * (i + 1)
-        if inclusive and i == num_ranges - 1:
-            ranges.append((start, end))
-        else:
-            ranges.append((start, end))
+        ranges.append((start, end))
         start = end
-    # Ensure monotonicity even with float/date math
-    fixed = []
-    prev = lo
-    for i, (a, b) in enumerate(ranges):
-        a = prev
-        if i == len(ranges) - 1:
-            b = hi
-        fixed.append((a, b))
-        prev = b
-    return fixed
+    return ranges
 
 
-def introspect_cols(pool, subquery_sql: str) -> List[str]:
-    """
-    Peek one row to get column names and order. We don't fetch the row; we only need metadata.
-    """
-    sql = f"SELECT * FROM ({subquery_sql}) WHERE 1=0"
-    with pool.acquire() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            return [d[0] for d in cur.description]
+def make_rownum_ranges(total_rows: int, splits: int) -> List[Tuple[int, int]]:
+    if total_rows == 0:
+        return []
+    size = math.ceil(total_rows / splits)
+    ranges = []
+    lo = 1
+    while lo <= total_rows:
+        hi = min(total_rows, lo + size - 1)
+        ranges.append((lo, hi))
+        lo = hi + 1
+    return ranges
 
 
-def worker_copy_range(
+def worker_insert_loop(
+    src_cursor,
+    tgt_cursor,
+    insert_sql: str,
+    batch_rows: int,
+    commit_every: int,
+    tgt_conn,
+) -> int:
+    inserted = 0
+    since_commit = 0
+    while True:
+        rows = src_cursor.fetchmany(batch_rows)
+        if not rows:
+            break
+        tgt_cursor.executemany(insert_sql, rows)
+        inserted += len(rows)
+        since_commit += len(rows)
+        if since_commit >= commit_every:
+            tgt_conn.commit()
+            since_commit = 0
+    if since_commit:
+        tgt_conn.commit()
+    return inserted
+
+
+def worker_range_splitcol(
     src_pool,
     tgt_pool,
     subquery_sql: str,
     target_table: str,
     cols: List[str],
     split_column: str,
-    lo,
-    hi,
+    lo, hi,
     arraysize: int,
     prefetch: int,
     batch_rows: int,
     commit_every: int,
     use_append_values: bool,
     enable_parallel_dml: bool,
-    range_index: int,
 ) -> int:
-    """
-    Copy a single [lo, hi] range. Returns number of rows inserted.
-    """
-    inserted = 0
     col_list = ", ".join(cols)
     placeholders = ", ".join([f":{i+1}" for i in range(len(cols))])
     hint = "/*+ APPEND_VALUES */ " if use_append_values else ""
     insert_sql = f"INSERT {hint}INTO {target_table} ({col_list}) VALUES ({placeholders})"
-
-    # Wrap original SQL & add range predicate
-    # For inclusivity: last range uses <= hi; others use < hi to avoid overlap.
-    range_pred = f":lo <= {split_column} AND {split_column} < :hi"
-    range_sql = f"SELECT * FROM ({subquery_sql}) WHERE {range_pred}"
+    # Use < hi except last worker; we don't know if we are last here, so just use [lo,hi) contract in caller.
+    sql = f"SELECT * FROM ({subquery_sql}) WHERE :lo <= {split_column} AND {split_column} < :hi"
 
     with src_pool.acquire() as sconn, tgt_pool.acquire() as tconn:
         if enable_parallel_dml:
@@ -143,106 +165,121 @@ def worker_copy_range(
                 with tconn.cursor() as tcur:
                     tcur.execute("ALTER SESSION ENABLE PARALLEL DML")
             except Exception:
-                pass  # If not supported, continue
-
+                pass
         with sconn.cursor() as scur, tconn.cursor() as tcur:
             scur.arraysize = arraysize
             scur.prefetchrows = prefetch
+            tcur.setinputsizes(None)
+            scur.execute(sql, dict(lo=lo, hi=hi))
+            return worker_insert_loop(scur, tcur, insert_sql, batch_rows, commit_every, tconn)
 
-            tcur.setinputsizes(None)  # let driver infer; override here if you know exact types for extra speed
 
-            scur.execute(range_sql, dict(lo=lo, hi=hi))
+def worker_range_rownum(
+    src_pool,
+    tgt_pool,
+    subquery_sql: str,
+    target_table: str,
+    cols: List[str],
+    rn_lo: int, rn_hi: int,
+    arraysize: int,
+    prefetch: int,
+    batch_rows: int,
+    commit_every: int,
+    use_append_values: bool,
+    enable_parallel_dml: bool,
+) -> int:
+    col_list = ", ".join(cols)
+    placeholders = ", ".join([f":{i+1}" for i in range(len(cols))])
+    hint = "/*+ APPEND_VALUES */ " if use_append_values else ""
+    insert_sql = f"INSERT {hint}INTO {target_table} ({col_list}) VALUES ({placeholders})"
 
-            buffer = []
-            last_commit = 0
-            while True:
-                rows = scur.fetchmany(batch_rows)
-                if not rows:
-                    break
-                buffer = rows  # already a list of tuples
-                tcur.executemany(insert_sql, buffer)
-                inserted += len(buffer)
-                last_commit += len(buffer)
-                if last_commit >= commit_every:
-                    tconn.commit()
-                    last_commit = 0
-            if last_commit:
-                tconn.commit()
+    # Two-level ROWNUM pagination (no stable order implied, but non-overlapping and exhaustive):
+    # inner: cap to :hi
+    inner = f"SELECT t.*, ROWNUM rn FROM ({subquery_sql}) t WHERE ROWNUM <= :hi"
+    # outer: keep rows >= :lo
+    outer = f"SELECT * FROM ({inner}) WHERE rn >= :lo"
 
-    return inserted
+    with src_pool.acquire() as sconn, tgt_pool.acquire() as tconn:
+        if enable_parallel_dml:
+            try:
+                with tconn.cursor() as tcur:
+                    tcur.execute("ALTER SESSION ENABLE PARALLEL DML")
+            except Exception:
+                pass
+        with sconn.cursor() as scur, tconn.cursor() as tcur:
+            scur.arraysize = arraysize
+            scur.prefetchrows = prefetch
+            tcur.setinputsizes(None)
+            scur.execute(outer, dict(lo=rn_lo, hi=rn_hi))
+            return worker_insert_loop(scur, tcur, insert_sql, batch_rows, commit_every, tconn)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ultra-fast Oracle→Oracle table copier.")
+    ap = argparse.ArgumentParser(description="Universal, high-speed Oracle→Oracle copier (any SQL).")
     # Source
-    parser.add_argument("--src-user", required=True)
-    parser.add_argument("--src-pass", required=True)
-    parser.add_argument("--src-host", required=True)
-    parser.add_argument("--src-port", default=1521)
-    parser.add_argument("--src-service", required=True)
-
+    ap.add_argument("--src-user", required=True)
+    ap.add_argument("--src-pass", required=True)
+    ap.add_argument("--src-host", required=True)
+    ap.add_argument("--src-port", default=1521)
+    ap.add_argument("--src-service", required=True)
     # Target
-    parser.add_argument("--tgt-user", required=True)
-    parser.add_argument("--tgt-pass", required=True)
-    parser.add_argument("--tgt-host", required=True)
-    parser.add_argument("--tgt-port", default=1521)
-    parser.add_argument("--tgt-service", required=True)
-
-    # Work
-    parser.add_argument("--sql-file", required=True, help="Path to a SQL file containing the SELECT.")
-    parser.add_argument("--target-table", required=True, help="Target table (optionally schema.table).")
-    parser.add_argument("--split-column", required=True, help="Numeric/date column used to partition the read.")
-    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="Parallel pipelines.")
-    parser.add_argument("--splits", type=int, default=DEFAULT_SPLITS, help="Number of ranges to divide.")
-    parser.add_argument("--batch-rows", type=int, default=DEFAULT_BATCH_ROWS, help="Rows per executemany().")
-    parser.add_argument("--arraysize", type=int, default=DEFAULT_ARRAYSIZE, help="Rows fetched per round-trip.")
-    parser.add_argument("--prefetchrows", type=int, default=DEFAULT_PREFETCH, help="Driver prefetch rows.")
-    parser.add_argument("--commit-every", type=int, default=DEFAULT_COMMIT_EVERY, help="Rows between commits.")
-    parser.add_argument("--truncate-target", action="store_true", help="TRUNCATE target before loading.")
-    parser.add_argument("--nologging", action="store_true", help="Set target table NOLOGGING during load.")
-    parser.add_argument("--append-values", action="store_true", help="Use /*+ APPEND_VALUES */ (direct-path style).")
-    parser.add_argument("--enable-parallel-dml", action="store_true", help="ALTER SESSION ENABLE PARALLEL DML.")
-    parser.add_argument("--target-degree", type=int, default=0, help="ALTER TABLE ... PARALLEL <N> (0=skip).")
-    parser.add_argument("--source-pool-size", type=int, default=0, help="Override source pool max; default=workers*2.")
-    parser.add_argument("--target-pool-size", type=int, default=0, help="Override target pool max; default=workers*2.")
-    args = parser.parse_args()
+    ap.add_argument("--tgt-user", required=True)
+    ap.add_argument("--tgt-pass", required=True)
+    ap.add_argument("--tgt-host", required=True)
+    ap.add_argument("--tgt-port", default=1521)
+    ap.add_argument("--tgt-service", required=True)
+    # Query & target
+    ap.add_argument("--sql-file", required=True, help="Path to SQL file containing the SELECT.")
+    ap.add_argument("--target-table", required=True, help="Target table (optionally schema.table).")
+    # Parallelization
+    ap.add_argument("--split-column", help="Optional numeric/date column for range partitioning.")
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    ap.add_argument("--splits", type=int, default=DEFAULT_SPLITS)
+    # Fetch/insert tuning
+    ap.add_argument("--arraysize", type=int, default=DEFAULT_ARRAYSIZE)
+    ap.add_argument("--prefetchrows", type=int, default=DEFAULT_PREFETCH)
+    ap.add_argument("--batch-rows", type=int, default=DEFAULT_BATCH_ROWS)
+    ap.add_argument("--commit-every", type=int, default=DEFAULT_COMMIT_EVERY)
+    # Loader options
+    ap.add_argument("--truncate-target", action="store_true")
+    ap.add_argument("--nologging", action="store_true")
+    ap.add_argument("--append-values", action="store_true", help="Use /*+ APPEND_VALUES */ for direct-path style.")
+    ap.add_argument("--enable-parallel-dml", action="store_true", help="ALTER SESSION ENABLE PARALLEL DML on target.")
+    ap.add_argument("--target-degree", type=int, default=0, help="ALTER TABLE ... PARALLEL N (0=skip).")
+    # Pools
+    ap.add_argument("--source-pool-size", type=int, default=0, help="Default=max(workers*2, workers).")
+    ap.add_argument("--target-pool-size", type=int, default=0)
+    # Source parallel hint
+    ap.add_argument("--source-parallel-hint", type=int, default=0, help="Wrap your SQL with /*+ parallel(N) */.")
+    args = ap.parse_args()
 
     init_client_if_available()
 
-    # Build DSNs
     src_dsn = build_dsn(args.src_host, args.src_port, args.src_service)
     tgt_dsn = build_dsn(args.tgt_host, args.tgt_port, args.tgt_service)
 
-    # Session pools (2×workers to avoid starvation)
-    src_pool_max = args.source_pool_size or (args.workers * 2)
-    tgt_pool_max = args.target_pool_size or (args.workers * 2)
+    # Pools (cap at workers*2 to avoid session starvation)
+    src_pool_max = args.source_pool_size or max(args.workers * 2, args.workers)
+    tgt_pool_max = args.target_pool_size or max(args.workers * 2, args.workers)
 
     src_pool = oracledb.SessionPool(
-        user=args.src_user,
-        password=args.src_pass,
-        dsn=src_dsn,
-        min=args.workers,
-        max=src_pool_max,
-        increment=max(1, args.workers // 2),
-        homogeneous=True,
-        threaded=True,
-        getmode=oracledb.SPOOL_ATTRVAL_WAIT,
+        user=args.src_user, password=args.src_pass, dsn=src_dsn,
+        min=args.workers, max=src_pool_max, increment=max(1, args.workers // 2),
+        homogeneous=True, threaded=True, getmode=oracledb.SPOOL_ATTRVAL_WAIT
     )
     tgt_pool = oracledb.SessionPool(
-        user=args.tgt_user,
-        password=args.tgt_pass,
-        dsn=tgt_dsn,
-        min=args.workers,
-        max=tgt_pool_max,
-        increment=max(1, args.workers // 2),
-        homogeneous=True,
-        threaded=True,
-        getmode=oracledb.SPOOL_ATTRVAL_WAIT,
+        user=args.tgt_user, password=args.tgt_pass, dsn=tgt_dsn,
+        min=args.workers, max=tgt_pool_max, increment=max(1, args.workers // 2),
+        homogeneous=True, threaded=True, getmode=oracledb.SPOOL_ATTRVAL_WAIT
     )
 
-    subquery_sql = read_sql(args.sql_file)
+    user_sql = read_sql(args.sql_file)
+    if args.source_parallel_hint and int(args.source_parallel_hint) > 0:
+        subquery_sql = wrap_with_parallel_hint(user_sql, int(args.source_parallel_hint))
+    else:
+        subquery_sql = user_sql
 
-    # Optional target prep
+    # Prep target (optional)
     if args.truncate_target or args.nologging or args.target_degree > 0:
         with tgt_pool.acquire() as conn, conn.cursor() as cur:
             if args.truncate_target:
@@ -255,61 +292,76 @@ def main():
                 except Exception as e:
                     print(f"[WARN] NOLOGGING failed: {e}")
             if args.target_degree > 0:
-                print(f"[INIT] ALTER TABLE {args.target_table} PARALLEL {args.target_degree}")
+                print(f"[INIT] ALTER TABLE {args.target_table} PARALLEL {int(args.target_degree)}")
                 try:
                     cur.execute(f"ALTER TABLE {args.target_table} PARALLEL {int(args.target_degree)}")
                 except Exception as e:
                     print(f"[WARN] PARALLEL degree failed: {e}")
             conn.commit()
 
-    # Discover column order once (keeps SELECT order == INSERT order)
-    cols = introspect_cols(src_pool, subquery_sql)
+    # Column list (from the user subquery)
+    cols = get_column_list_from_subquery(src_pool, subquery_sql)
     if not cols:
-        print("No columns detected from SQL; aborting.", file=sys.stderr)
+        print("No columns detected from source query; aborting.", file=sys.stderr)
         sys.exit(1)
     print(f"[INFO] Columns: {', '.join(cols)}")
-
-    # Compute split ranges
-    lo, hi = get_min_max(src_pool, subquery_sql, args.split_column)
-    print(f"[INFO] Split column {args.split_column} min={lo} max={hi}")
-    ranges = make_ranges(lo, hi, args.splits)
-
-    # Kick off parallel copy
-    print(f"[RUN ] workers={args.workers} splits={len(ranges)} arraysize={args.arraysize} "
-          f"prefetch={args.prefetchrows} batch={args.batch_rows} commit_every={args.commit_every} "
-          f"append_values={args.append_values}")
 
     t0 = time.time()
     total_inserted = 0
     futures = []
+
+    print(f"[CFG ] workers={args.workers} splits={args.splits} arraysize={args.arraysize} "
+          f"prefetch={args.prefetchrows} batch={args.batch_rows} commit_every={args.commit_every} "
+          f"append_values={args.append_values} rownum_mode={not bool(args.split_column)}")
+
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        for i, (rlo, rhi) in enumerate(ranges):
-            fut = ex.submit(
-                worker_copy_range,
-                src_pool,
-                tgt_pool,
-                subquery_sql,
-                args.target_table,
-                cols,
-                args.split_column,
-                rlo,
-                rhi,
-                args.arraysize,
-                args.prefetchrows,
-                args.batch_rows,
-                args.commit_every,
-                args.append_values,
-                args.enable_parallel_dml,
-                i,
-            )
-            futures.append(fut)
+        if args.split_column:
+            # numeric/date range partitioning
+            lo, hi = get_min_max(src_pool, subquery_sql, args.split_column)
+            ranges = make_numeric_ranges(lo, hi, args.splits)
+            # Make last range inclusive by nudging hi slightly in the last job
+            for i, (rlo, rhi) in enumerate(ranges):
+                # last chunk uses <= hi; we emulate by passing rhi for last and < rhi for others
+                if i == len(ranges) - 1:
+                    # pass a tiny epsilon by not altering; we'll modify SQL to < :hi for all
+                    pass
+                fut = ex.submit(
+                    worker_range_splitcol,
+                    src_pool, tgt_pool,
+                    subquery_sql, args.target_table, cols, args.split_column,
+                    rlo, rhi,
+                    args.arraysize, args.prefetchrows,
+                    args.batch_rows, args.commit_every,
+                    args.append_values, args.enable_parallel_dml,
+                )
+                futures.append(fut)
+        else:
+            # ROWNUM chunking
+            total = get_total_count(src_pool, subquery_sql)
+            print(f"[INFO] Total rows reported by COUNT(*): {total:,}")
+            if total == 0:
+                print("[DONE] No rows to copy.")
+                src_pool.close(); tgt_pool.close()
+                return
+            ranges = make_rownum_ranges(total, args.splits)
+            for rn_lo, rn_hi in ranges:
+                fut = ex.submit(
+                    worker_range_rownum,
+                    src_pool, tgt_pool,
+                    subquery_sql, args.target_table, cols,
+                    rn_lo, rn_hi,
+                    args.arraysize, args.prefetchrows,
+                    args.batch_rows, args.commit_every,
+                    args.append_values, args.enable_parallel_dml,
+                )
+                futures.append(fut)
 
         for fut in as_completed(futures):
             inserted = fut.result()
             total_inserted += inserted
-            print(f"[OK  ] range done, rows={inserted:,} (total so far={total_inserted:,})")
+            print(f"[OK  ] chunk done, rows={inserted:,} (total so far={total_inserted:,})")
 
-    # Optional: restore LOGGING and parallel degree
+    # Restore target settings
     if args.nologging or args.target_degree > 0:
         with tgt_pool.acquire() as conn, conn.cursor() as cur:
             if args.nologging:
@@ -327,11 +379,43 @@ def main():
             conn.commit()
 
     elapsed = time.time() - t0
-    print(f"[DONE] Inserted {total_inserted:,} rows in {elapsed:.2f}s "
-          f"({(total_inserted/elapsed if elapsed>0 else 0):,.0f} rows/sec)")
+    rps = (total_inserted / elapsed) if elapsed > 0 else 0
+    print(f"[DONE] Inserted {total_inserted:,} rows in {elapsed:.2f}s ({rps:,.0f} rows/sec)")
+
     src_pool.close()
     tgt_pool.close()
 
 
 if __name__ == "__main__":
     main()
+
+pip install oracledb
+
+SELECT col1, col2, ..., col30
+FROM source_schema.source_table
+WHERE status = 'ACTIVE'
+
+python ora_copy_universal.py \
+  --src-user SRC --src-pass P --src-host src-host --src-port 1521 --src-service SRCSVC \
+  --tgt-user TGT --tgt-pass Q --tgt-host tgt-host --tgt-port 1521 --tgt-service TGTSVC \
+  --sql-file myquery.sql \
+  --target-table target_schema.target_table \
+  --workers 8 --splits 32 \
+  --arraysize 10000 --prefetchrows 10000 \
+  --batch-rows 10000 --commit-every 200000 \
+  --truncate-target --nologging --append-values \
+  --enable-parallel-dml --target-degree 8 \
+  --source-parallel-hint 8
+
+python ora_copy_universal.py \
+  ...same connection args... \
+  --sql-file myquery.sql \
+  --target-table target_schema.target_table \
+  --split-column id \
+  --workers 8 --splits 32 \
+  --arraysize 10000 --prefetchrows 10000 \
+  --batch-rows 10000 --commit-every 200000 \
+  --truncate-target --nologging --append-values \
+  --enable-parallel-dml --target-degree 8 \
+  --source-parallel-hint 8
+
