@@ -1,0 +1,40 @@
+from pyspark.sql import SparkSession
+
+# ===== CONFIG =====
+CSV_PATH = "hdfs:///path/to/data.csv"  # or "file:///path/to/data.csv"
+MSSQL_URL = "jdbc:sqlserver://your_sql_server_host:1433;databaseName=your_database"
+MSSQL_USER = "your_user"
+MSSQL_PASS = "your_password"
+TARGET_TABLE = "dbo.your_table"
+BATCH_SIZE = 5000  # Tune for performance
+
+def main():
+    # Create Spark session
+    spark = SparkSession.builder \
+        .appName("CSV_to_MSSQL") \
+        .config("spark.driver.extraClassPath", "/path/to/mssql-jdbc.jar") \
+        .getOrCreate()
+
+    # Read CSV file
+    df = spark.read \
+        .option("header", "true") \
+        .option("inferSchema", "true") \
+        .csv(CSV_PATH)
+
+    # Write to SQL Server
+    df.write \
+        .format("jdbc") \
+        .option("url", MSSQL_URL) \
+        .option("dbtable", TARGET_TABLE) \
+        .option("user", MSSQL_USER) \
+        .option("password", MSSQL_PASS) \
+        .option("batchsize", BATCH_SIZE) \
+        .option("truncate", "true") \  # Replace table data, remove if you want append
+        .mode("overwrite") \           # Or "append"
+        .save()
+
+    spark.stop()
+    print("✅ CSV data loaded into MSSQL successfully.")
+
+if __name__ == "__main__":
+    main()
