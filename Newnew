@@ -118,3 +118,76 @@ INNER JOIN msdb.dbo.sysschedules ss ON s.schedule_id = ss.schedule_id
 LEFT JOIN msdb.dbo.sysjobhistory h ON j.job_id = h.job_id AND h.step_id = 0
 LEFT JOIN JobDurations d ON j.job_id = d.job_id
 ORDER BY NextRunDateTime;
+
+
+1. DEV (Development Environment)
+
+Purpose: Where developers write, unit test, and debug code.
+
+Users: Developers.
+
+Stability: Least stable, frequent changes, may have incomplete features.
+
+Data: Dummy or very small sample data.
+
+Goal: Quick iteration and code validation.
+
+🔹 2. SIT (System Integration Testing)
+
+Purpose: Verify that different modules/services integrate correctly.
+
+Users: Developers + integration testers.
+
+Stability: More stable than DEV, but still may get frequent deployments.
+
+Data: Larger test datasets, sometimes masked copies of production.
+
+Goal: Test system-to-system flows (APIs, DB sync, messaging).
+
+🔹 3. QA (Quality Assurance Environment)
+
+Purpose: Test overall functionality, regression, and bug fixes.
+
+Users: QA testers (manual + automation).
+
+Stability: More stable than SIT; resembles production setup.
+
+Data: Test data (often masked prod data).
+
+Goal: Validate that the application works as expected end-to-end.
+
+🔹 4. PERF (Performance / Load Testing Environment)
+
+Purpose: Test how the system behaves under load, stress, and performance benchmarks.
+
+Users: Performance engineers.
+
+Stability: Built to mimic production scale (hardware/config).
+
+Data: Large, production-like data sets.
+
+Goal: Ensure system can handle expected (and peak) traffic.
+
+🔹 5. UAT (User Acceptance Testing)
+
+Purpose: Let business users test and approve features against requirements.
+
+Users: End-users, product owners, business stakeholders.
+
+Stability: Very stable; minimal code changes.
+
+Data: Often a copy of production data (sanitized/masked).
+
+Goal: Confirm “does the system meet business needs?” before go-live.
+
+🔹 6. PROD (Production Environment)
+
+Purpose: The live environment where real users interact with the system.
+
+Users: Customers, end-users.
+
+Stability: Must be highly stable, monitored, secured.
+
+Data: Real business data.
+
+Goal: Deliver actual service to customers.
