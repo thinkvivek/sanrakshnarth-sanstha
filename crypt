@@ -1,0 +1,70 @@
+using System;
+using System.Security.Cryptography;
+using System.Text;
+
+public class JasyptDecryptor
+{
+    public static string Decrypt(string encrypted, string password, int iterations = 1000)
+    {
+        // Strip ENC(...)
+        if (encrypted.StartsWith("ENC(") && encrypted.EndsWith(")"))
+        {
+            encrypted = encrypted.Substring(4, encrypted.Length - 5);
+        }
+
+        byte[] data = Convert.FromBase64String(encrypted);
+        byte[] salt = data[..8];
+        byte[] ciphertext = data[8..];
+
+        byte[] derived = new byte[16];
+        byte[] block = null;
+
+        int offset = 0;
+        using var md5 = MD5.Create();
+
+        while (offset < 16)
+        {
+            byte[] input;
+
+            if (block == null)
+                input = Combine(password, salt);
+            else
+                input = Combine(block, password, salt);
+
+            block = md5.ComputeHash(input);
+            for (int i = 1; i < iterations; i++)
+                block = md5.ComputeHash(block);
+
+            Array.Copy(block, 0, derived, offset, Math.Min(16 - offset, block.Length));
+            offset += block.Length;
+        }
+
+        byte[] key = derived[..8];
+        byte[] iv = derived[8..];
+
+        using var des = DES.Create();
+        des.Mode = CipherMode.CBC;
+        des.Padding = PaddingMode.PKCS7;
+
+        var decryptor = des.CreateDecryptor(key, iv);
+        byte[] result = decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+
+        return Encoding.UTF8.GetString(result);
+    }
+
+    private static byte[] Combine(params object[] arrays)
+    {
+        using var ms = new System.IO.MemoryStream();
+        foreach (var a in arrays)
+        {
+            byte[] data = a switch
+            {
+                string s => Encoding.UTF8.GetBytes(s),
+                byte[] b => b,
+                _ => throw new InvalidOperationException()
+            };
+            ms.Write(data);
+        }
+        return ms.ToArray();
+    }
+}
