@@ -37,3 +37,17 @@ SECTION 6: Risks / Observations
 SECTION 7: Simplified Business Explanation (non-technical)
 
 Here is the file:
+
+
+You are a senior Java developer.
+
+Analyze this Java file and:
+
+1. Explain in simple terms what this class does.
+2. Extract only the business logic (ignore getters, setters, logs, annotations).
+3. List the important conditions (if/else rules).
+4. Explain any calculations or status changes.
+5. Describe what database changes happen (if any).
+
+Keep the explanation short and clear.
+Here is the file:
